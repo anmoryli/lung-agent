@@ -35,6 +35,11 @@ class FakeWriteTool:
         return payload
 
 
+class FakeInterrupt:
+    def __init__(self, interrupt_id: str) -> None:
+        self.id = interrupt_id
+
+
 class FakeStore:
     def __init__(self) -> None:
         self.items: dict[tuple[tuple[str, ...], str], dict[str, str]] = {}
@@ -47,6 +52,19 @@ class FakeStore:
 
 
 class PatientWorkflowTests(unittest.TestCase):
+    def test_agui_resume_matches_deepagents_hitl_decision_shape(self) -> None:
+        interrupt = FakeInterrupt("interrupt-1")
+        approved = PatientMainAgent._agui_interrupt_decisions(
+            [interrupt],
+            [{"interrupt_id": "interrupt-1", "status": "resolved", "payload": {"approved": True}}],
+        )
+        rejected = PatientMainAgent._agui_interrupt_decisions(
+            [interrupt],
+            [{"interrupt_id": "interrupt-1", "status": "resolved", "payload": {"approved": False}}],
+        )
+        self.assertEqual(approved, {"interrupt-1": {"decisions": [{"type": "approve"}]}})
+        self.assertEqual(rejected, {"interrupt-1": {"decisions": [{"type": "reject", "message": "患者没有同意这次写入。"}]}})
+
     def test_urgent_phrases_bypass_model_and_negated_phrase_does_not(self) -> None:
         self.assertTrue(PatientMainAgent._needs_urgent_care("我现在在咳血"))
         self.assertTrue(PatientMainAgent._needs_urgent_care("我想自杀"))

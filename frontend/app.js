@@ -1,5 +1,3 @@
-const STORAGE_KEY = "deepagents.patient-chat.current.v2";
-    const LEGACY_STORAGE_KEY = "deepagents.patient-chat.v1";
     const conversation = document.querySelector("#conversation");
     const sessionList = document.querySelector("#sessionList");
     const form = document.querySelector("#chatForm");
@@ -11,29 +9,12 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
     const agentProgress = document.querySelector("#agentProgress");
     const agentStatus = document.querySelector("#agentStatus");
     const agentTodos = document.querySelector("#agentTodos");
-    let state = readState();
+    let state = { threadId: newId("patient-chat"), messages: [], patientId: "demo-patient-0001" };
     let activeController = null;
     let sessionCatalog = [];
 
     function newId(prefix) {
       return `${prefix}-${crypto.randomUUID()}`;
-    }
-
-    function readState() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-        if (saved && typeof saved.threadId === "string") return { ...saved, messages: [], pendingInterrupts: [] };
-        const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
-        if (legacy && typeof legacy.threadId === "string") return { ...legacy, messages: [], pendingInterrupts: [] };
-      } catch (error) {
-        console.warn("读取本地聊天记录失败", error);
-      }
-      return { threadId: newId("patient-chat"), messages: [], patientId: "demo-patient-0001" };
-    }
-
-    function saveState() {
-      state.patientId = patientId.value.trim() || "demo-patient-0001";
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ threadId: state.threadId, patientId: state.patientId }));
     }
 
     function renderAgentState(snapshot) {
@@ -60,7 +41,6 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
     function addMessage(role, content) {
       const item = { id: newId("msg"), role, content };
       state.messages.push(item);
-      saveState();
       return item;
     }
 
@@ -124,7 +104,6 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
         pendingInterrupts: saved.pending_interrupts || [],
       };
       patientId.value = state.patientId;
-      saveState();
       if (state.agentState && Object.keys(state.agentState).length) renderAgentState(state.agentState);
       else clearAgentState();
       renderHistory();
@@ -132,20 +111,10 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
     }
 
     async function initializeSessions() {
-      const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
       await refreshSessionCatalog();
-      if (legacy?.threadId && Array.isArray(legacy.messages) && legacy.messages.length &&
-          !sessionCatalog.some(item => item.thread_id === legacy.threadId)) {
-        const imported = await fetch("/api/v1/agents/patient/sessions/import", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ threadId: legacy.threadId, patientId: legacy.patientId || "demo-patient-0001", messages: legacy.messages }),
-        });
-        if (!imported.ok) throw new Error("旧会话迁入服务端失败");
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-        await refreshSessionCatalog();
-      }
-      const target = sessionCatalog.find(item => item.thread_id === state.threadId) || sessionCatalog[0];
-      if (target) await loadSession(target.thread_id);
+      const latest = sessionCatalog[0];
+      if (latest) await loadSession(latest.thread_id);
+      else renderHistory();
     }
 
     function renderMessage(message, pending = false, isError = false) {
@@ -306,9 +275,16 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
     function showInterrupt(bubble, interrupts) {
       const panel = document.createElement("div");
       panel.className = "interrupt";
-      const text = document.createElement("p");
-      text.textContent = "助手请求确认一项写入操作。请看清操作内容，再选择是否继续。";
-      panel.append(text);
+      const heading = document.createElement("p");
+      heading.textContent = "请核对下面这项操作，再选择是否执行：";
+      panel.append(heading);
+      for (const item of interrupts) {
+        if (typeof item.message !== "string" || !item.message.trim()) continue;
+        const detail = document.createElement("pre");
+        detail.className = "interrupt-detail";
+        detail.textContent = item.message;
+        panel.append(detail);
+      }
       const actions = document.createElement("div");
       actions.className = "interrupt-actions";
       for (const [label, approved] of [["确认执行", true], ["暂不执行", false]]) {
@@ -342,10 +318,11 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
       if (!lastUser) return;
       const assistant = addMessage("assistant", "");
       const rendered = renderMessage(assistant, true);
-      let pendingInterrupts = [];
+      let pendingInterrupts = resume ? [...(runState.pendingInterrupts || [])] : [];
       const controller = new AbortController();
       activeController = controller;
       setBusy(true);
+      renderAgentState({ activity: "\u6b63\u5728\u8fde\u63a5\u670d\u52a1", todos: [] });
       let streamError = null;
       try {
         const body = {
@@ -385,7 +362,9 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
             if (!data) continue;
             let event;
             try { event = JSON.parse(data); } catch { continue; }
-            if (event.type === "STATE_SNAPSHOT") {
+            if (event.type === "RUN_STARTED") {
+      renderAgentState({ activity: "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", todos: [] });
+            } else if (event.type === "STATE_SNAPSHOT") {
               renderAgentState(event.snapshot);
             } else if (event.type === "TEXT_MESSAGE_CONTENT") {
               assistant.content += event.delta || "";
@@ -396,9 +375,9 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
               finished = true;
               rendered.bubble.classList.remove("pending");
               const outcome = event.outcome;
-              if (outcome?.type === "interrupt" && Array.isArray(outcome.interrupts)) {
-                pendingInterrupts = outcome.interrupts;
-              }
+              pendingInterrupts = outcome?.type === "interrupt" && Array.isArray(outcome.interrupts)
+                ? outcome.interrupts
+                : [];
             } else if (event.type === "RUN_ERROR") {
               throw new Error(event.message || "Agent 本轮运行失败");
             }
@@ -419,7 +398,6 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
         renderMarkdown(rendered.bubble, assistant.content);
         if (pendingInterrupts.length) showInterrupt(rendered.bubble, pendingInterrupts);
         rendered.bubble.classList.remove("pending");
-        if (state === runState) saveState();
         refreshSessionCatalog().catch(error => console.warn("刷新会话列表失败", error));
         if (activeController === controller) activeController = null;
         setBusy(false);
@@ -449,14 +427,13 @@ const STORAGE_KEY = "deepagents.patient-chat.current.v2";
       activeController?.abort();
       state = { threadId: newId("patient-chat"), messages: [], patientId: patientId.value.trim() || "demo-patient-0001" };
       clearAgentState();
-      saveState();
       renderHistory();
       renderSessionCatalog();
       input.focus();
     });
 
     patientId.value = state.patientId || "demo-patient-0001";
-    patientId.addEventListener("change", saveState);
+    patientId.addEventListener("change", () => refreshSessionCatalog().catch(error => console.warn("\u5237\u65b0\u4f1a\u8bdd\u5217\u8868\u5931\u8d25", error)));
     document.querySelectorAll(".suggestion").forEach(button => {
       button.addEventListener("click", () => {
         input.value = button.textContent;

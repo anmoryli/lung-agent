@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from functools import cached_property
 from typing import Any, Callable
@@ -20,16 +19,16 @@ from backend.runtime.async_runner import run_async
 
 
 PATIENT_PROMPT = """
-你是基于 DeepAgents 的肺癌患者服务助手。先判断患者现在要办什么，再决定直接回答还是交给一个最合适的专科助手。
+你是基于 DeepAgents 的患者服务助手。先识别患者当前要办的事，再决定直接回答还是交给一个最合适的专科助手。
 
 工作顺序：
-1. 打招呼时简短回应，不罗列功能清单，也不主动输出与当前问题无关的急症提醒。识别目标后只处理患者当前要办的事。
-2. 需要病历事实时，只让专科助手查当前合成患者的资料。资料里没有的内容就说暂时查不到。
-3. 先用病历、当前会话和已有信息补齐上下文，不让患者重复提供系统已有的信息。确实缺少阻塞下一步的内容时，每轮只问一个最关键的问题；能用安全默认值继续时就直接继续，不连环追问。
-4. 如果患者只泛称“挂号/预约”，而资料里已有未来的同类已确认预约，就只告知最近一条预约的科室、时间和状态，然后结束回复；不要追问是否要新挂、不要索要更多字段。患者要新增预约会继续提出。
-5. 一次只委派一个专科助手，不让子助手互相委派。预约请求只回答相关预约，别把同日检查、护理或其他无关安排一并列出。
-6. 写入工具会弹出一次确认。先用一句话说明将提交的内容，再调用写入工具等待确认；不要在工具确认前另行追问一次口头同意。预约申请的状态是“待医院确认”，不能说成已挂号成功。
-7. 输出简短、易懂的当前结论和下一步。医疗判断由医生确认；不诊断、不建议停换药、不决定检查必要性，不承诺资格、费用或服务可用。
+1. 只处理患者当前提出的事情。打招呼就简短回应，不罗列功能，也不主动输出无关提醒。
+2. 患者说“挂号”“帮我挂号”或指定科室要求挂号时，一律按新挂号申请处理。不要先查询或展示已有预约；只有患者明确询问已有预约、预约时间或预约状态时，才查询已有预约。
+3. 需要病历事实时，只让专科助手查询当前合成患者资料。资料里没有的内容就说明暂时查不到。
+4. 先使用当前会话、患者资料和相关历史补齐信息，不让患者重复提供系统已有的信息。缺少会阻塞下一步的内容时，每轮只问一个最关键的问题；能安全继续时直接继续，不连续追问。
+5. 一次只委派一个专科助手，不让子助手互相委派。只展示与当前请求有关的信息，不附带其他科室、护理或检查安排。
+6. 写入工具会触发确认。调用前用一句话说明要提交的内容，然后等待确认卡；不要额外再问一次口头同意。患者已明确答应本轮提出的具体写入申请时，直接调用写入工具。预约申请提交后是“待医院确认”，不能说成已经挂号成功。系统没有号源查询能力时，不得声称查到号源或保证时间。
+7. 回复简短、易懂，只给当前结论和下一步。医疗判断由医生确认；不诊断、不建议停换药、不决定检查必要性，不承诺资格、费用或服务可用。
 
 患者提到严重呼吸困难、胸痛、咯血、高热寒战、严重腹泻或自伤想法时，优先建议立即联系当地急救或就近急诊。不要把高风险情况说成在家观察即可，也不要输出内部风险标签、工具名、Agent 名或推理过程。
 
@@ -80,61 +79,6 @@ class PatientMainAgent(RoleMainAgent):
                     return True
                 position = message.find(term, position + len(term))
         return False
-
-    @staticmethod
-    def _is_generic_booking_request(message: str) -> bool:
-        """泛泛说要挂号时先查是否已经有号，避免把患者带进重复预约流程。"""
-        text = re.sub(r"\s+", "", message)
-        if any(term in text for term in ("取消", "改期", "改约", "新挂", "再挂", "另外挂", "查询预约")):
-            return False
-        return any(term in text for term in ("帮我挂个号", "帮我挂号", "帮我预约挂号", "能不能帮我挂个号", "可以帮我挂个号"))
-
-    @staticmethod
-    def _existing_clinic_appointment(tool_result: Any) -> str | None:
-        """从 MCP 搜索结果里挑最近一条未来肿瘤复诊号，忽略护理随访等无关预约。"""
-        bundles = []
-        if isinstance(tool_result, dict):
-            bundles.append(tool_result)
-        elif isinstance(tool_result, list):
-            for item in tool_result:
-                if isinstance(item, dict) and isinstance(item.get("text"), str):
-                    try:
-                        bundles.append(json.loads(item["text"]))
-                    except json.JSONDecodeError:
-                        continue
-
-        now = datetime.now(timezone.utc)
-        matches = []
-        for bundle in bundles:
-            for entry in bundle.get("entry", []):
-                resource = entry.get("resource", {})
-                if resource.get("status") != "booked":
-                    continue
-                service_names = [
-                    value
-                    for service in resource.get("serviceType", [])
-                    for value in [service.get("text", ""), *(coding.get("display", "") for coding in service.get("coding", []))]
-                    if value
-                ]
-                service_name = "、".join(dict.fromkeys(service_names))
-                if not any(term in service_name for term in ("肿瘤", "复诊")):
-                    continue
-                try:
-                    start = datetime.fromisoformat(resource["start"].replace("Z", "+00:00"))
-                    end = datetime.fromisoformat(resource["end"].replace("Z", "+00:00"))
-                except (KeyError, ValueError):
-                    continue
-                if start >= now:
-                    matches.append((start, end, service_name))
-
-        if not matches:
-            return None
-        start, end, service_name = min(matches, key=lambda item: item[0])
-        weekdays = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-        return (
-            f"您已有一条{service_name}预约：{start.month}月{start.day}日（{weekdays[start.weekday()]}）"
-            f"{start:%H:%M}–{end:%H:%M}，状态为已确认。"
-        )
 
     async def _invoke_patient(
         self,
@@ -204,21 +148,6 @@ class PatientMainAgent(RoleMainAgent):
         update_state("正在连接患者资料")
         async with MCPAdapter(mcp_transport()) as adapter:
             available = {item.name: item for item in await adapter.list_tools()}
-            if self._is_generic_booking_request(message):
-                appointment_tool = available.get("search_appointments")
-                if appointment_tool is not None:
-                    update_state("正在查询已有预约")
-                    result = await appointment_tool.ainvoke({"patient_id": patient_id})
-                    existing_appointment = self._existing_clinic_appointment(result)
-                    if existing_appointment:
-                        if memory_enabled:
-                            await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "user", message)
-                            await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", existing_appointment)
-                        if on_delta is not None:
-                            on_delta(existing_appointment)
-                        update_state("已完成", [])
-                        return existing_appointment
-
             registry = PatientAgentRegistry()
             subagents = registry.deepagent_specs(available, patient_id, task_key)
             tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
@@ -260,7 +189,10 @@ class PatientMainAgent(RoleMainAgent):
                         decision = {"type": "approve" if approval else "reject"}
                         if not approval:
                             decision["message"] = "患者没有同意这次写入。"
-                        decisions = {interrupt.id: decision for interrupt in interrupts}
+                    decisions = {
+                        interrupt.id: {"decisions": [decision]}
+                        for interrupt in interrupts
+                    }
                     resumed = await graph.ainvoke(
                         Command(resume=decisions),
                         config=config,
@@ -376,15 +308,15 @@ class PatientMainAgent(RoleMainAgent):
         return bool(interrupts) or bool(result.get("__interrupt__"))
 
     @staticmethod
-    def _agui_interrupt_decisions(interrupts: list[Any], responses: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    def _agui_interrupt_decisions(interrupts: list[Any], responses: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, str]]]]:
         response_by_id = {item.get("interrupt_id"): item for item in responses}
         expected = {item.id for item in interrupts}
         if set(response_by_id) != expected:
             raise ValueError("AG-UI resume 必须一次回应当前会话的全部待处理确认。")
-        decisions: dict[str, dict[str, str]] = {}
+        decisions: dict[str, dict[str, list[dict[str, str]]]] = {}
         for interrupt_id, item in response_by_id.items():
             if item.get("status") == "cancelled":
-                decisions[interrupt_id] = {"type": "reject", "message": "患者取消了这次写入。"}
+                decisions[interrupt_id] = {"decisions": [{"type": "reject", "message": "患者取消了这次写入。"}]}
                 continue
             payload = item.get("payload")
             if not isinstance(payload, dict) or not isinstance(payload.get("approved"), bool):
@@ -392,7 +324,7 @@ class PatientMainAgent(RoleMainAgent):
             decision = {"type": "approve" if payload["approved"] else "reject"}
             if not payload["approved"]:
                 decision["message"] = "患者没有同意这次写入。"
-            decisions[interrupt_id] = decision
+            decisions[interrupt_id] = {"decisions": [decision]}
         return decisions
 
     @staticmethod
@@ -446,12 +378,12 @@ class PatientMainAgent(RoleMainAgent):
 
     @staticmethod
     def _approval_summary(result: Any) -> str:
-        """把暂停的写入内容给患者看清楚，再让患者决定是否继续。"""
+        """把暂停的写入内容整理成患者看得懂的确认卡文字。"""
         labels = {
-            "create_appointment": "创建预约",
-            "create_service_case": "提交服务核实申请",
-            "create_task": "创建服务跟进记录",
-            "create_service_request_draft": "创建检查申请草稿",
+            "create_appointment": "提交挂号申请",
+            "create_service_case": "提交服务申请",
+            "create_task": "创建服务跟进任务",
+            "create_service_request_draft": "创建服务申请草稿",
         }
         interrupts = getattr(result, "interrupts", ())
         if not interrupts:
@@ -463,12 +395,24 @@ class PatientMainAgent(RoleMainAgent):
             if isinstance(value, dict) and value.get("name"):
                 actions = [{"name": value["name"], "args": value.get("args", {})}]
             for action in actions:
-                label = labels.get(action.get("name"), "写入演示资料")
-                args = json.dumps(action.get("args", {}), ensure_ascii=False)
-                details.append(f"- {label}：{args}")
+                name = action.get("name", "")
+                args = action.get("args", {})
+                if name == "create_appointment":
+                    start = str(args.get("start", "待安排")).replace("T", " ")[:16]
+                    end = str(args.get("end", "")).replace("T", " ")[:16]
+                    when = f"{start} 至 {end}" if end else start
+                    description = str(args.get("description", "就诊预约申请"))
+                    details.append(
+                        f"- {labels[name]}：{description}；申请时间：{when}；提交后状态为待医院确认。"
+                    )
+                else:
+                    details.append(
+                        f"- {labels.get(name, '提交写入申请')}："
+                        + json.dumps(args, ensure_ascii=False)
+                    )
         if not details:
-            details = ["- 写入或更新演示资料（具体内容请检查调用方展示）"]
-        return "准备执行以下操作：\n" + "\n".join(details) + "\n\n确认后请在下一次请求里传 context.approvePendingWrite=true；取消请传 false。"
+            details = ["- 写入申请内容暂时无法读取，请联系服务维护人员。"]
+        return "请核对这项操作：\n" + "\n".join(details)
 
     @staticmethod
     def _last_reply(result: dict[str, Any]) -> str:

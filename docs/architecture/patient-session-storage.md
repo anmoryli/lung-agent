@@ -26,7 +26,7 @@ Accept: text/event-stream
 
 请求体沿用 AG-UI `RunAgentInput`，包括 `threadId`、新的 `runId`、累计 `messages`，需要恢复确认时附上 `resume`。第三方调用方也应先按 `patientId` 获取目录，再把选中的 `threadId` 和会话消息交给标准 AG-UI 运行入口。
 
-旧页面 `deepagents.patient-chat.v1` 中的记录会在首次加载时迁入服务端目录。`localStorage` 以后只保留当前选中的 `threadId` 和演示患者 ID，不保存对话正文。
+页面不使用 `localStorage` 或 `sessionStorage` 保存会话。打开页面时从服务端会话目录加载最近会话；新会话的对话、Agent 状态和待确认项都由服务端 SQLite 保存，刷新后可从会话列表重新加载。
 
 ## 部署边界
 

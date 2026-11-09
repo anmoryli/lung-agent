@@ -289,7 +289,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
             future = submit_async(run_patient())
             active_runs.attach(run_input.run_id, future)
-            future.add_done_callback(lambda completed: self._queue_completion(events, completed))
+            future.add_done_callback(
+                lambda completed: self._queue_completion(events, completed, run_input.run_id, run_input.thread_id)
+            )
         except Exception:
             active_runs.finish(run_input.run_id)
             session_store.save(run_input.thread_id, patient_id, request_messages, status="error")
@@ -314,6 +316,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 thread_id=run_input.thread_id,
                 run_id=run_input.run_id,
             ))
+            if push_state:
+                progress["state"] = {"activity": "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", "todos": []}
+                self._write_event(encoder, StateSnapshotEvent(
+                    type=EventType.STATE_SNAPSHOT,
+                    snapshot=progress["state"],
+                ))
             self._write_event(encoder, TextMessageStartEvent(
                 type=EventType.TEXT_MESSAGE_START,
                 message_id=message_id,
@@ -374,6 +382,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                         run_input.thread_id, patient_id,
                         _append_assistant(request_messages, partial) if partial else request_messages,
                         status="error", agent_state=progress["state"],
+                        pending_interrupts=(previous_session or {}).get("pending_interrupts", []),
                     )
                     if push_state:
                         self._write_event(encoder, StateSnapshotEvent(
@@ -400,10 +409,16 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             active_runs.finish(run_input.run_id)
 
     @staticmethod
-    def _queue_completion(events: queue.Queue, future: object) -> None:
+    def _queue_completion(events: queue.Queue, future: object, run_id: str, thread_id: str) -> None:
         try:
             result = future.result()
         except Exception as error:
+            logging.error(
+                "AG-UI \u60a3\u8005 Agent \u6267\u884c\u5931\u8d25\uff0crunId=%s threadId=%s",
+                run_id,
+                thread_id,
+                exc_info=(type(error), error, error.__traceback__),
+            )
             events.put(("error", error))
         else:
             events.put(("done", result))
