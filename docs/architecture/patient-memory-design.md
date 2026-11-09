@@ -24,6 +24,8 @@
 
 用户明确纠正旧记忆时，旧版本保留为 `superseded` 并记录替代关系；新旧关系无法判断时，冲突双方标成 `conflicted`，都不进摘要。过期、陈旧、冲突、替代条目都不会被物理删除。
 
+用户明确关闭记忆或要求忘记时，服务先在记忆数据库保存关闭状态和持久删除任务，当前请求立即停止读取、归档和抽取记忆。后台清理线程等该患者正在运行的 Agent 请求及会话落盘结束后，按患者前缀删除 LangGraph checkpoint，再删除会话目录和记忆数据。删除任务完成前，该患者的新 Agent 请求暂时返回冲突响应，避免新数据混进待清理范围；清理失败会保留任务并退避重试，服务重启后会恢复中断任务。记忆保持关闭，只有请求明确带 `memoryConsent=true` 才重新开启。
+
 ### 对话归档
 
 用户原话和助手回复分别写入 `patient_memory_vectors` 的 `archive` 类别，用 BGE Small 中文模型生成 512 维向量。每轮开始时，只在同一患者的 `archive` 中做余弦相似度检索，主 Agent取前 4 条；需要更多历史时，`search_patient_history` 可再取前 5 条。归档内容不是当前事实，模型必须结合时间和来源判断。
@@ -41,6 +43,8 @@
 | 向量化的对话归档 | 同文件的 sqlite-vec 表 `patient_memory_vectors`，仅 `kind=archive` 参与历史向量检索 |
 | 召回审计 | 同文件的 `patient_memory_retrievals` |
 | 原始会话和图 checkpoint | `patient-sessions.sqlite3`、`patient-checkpoints.sqlite3` |
+
+患者要求删除时，后台任务会清理以上三类存储中的对应患者数据；HTTP 请求不会等待清理结束。此流程删除 SQLite 中对应的逻辑记录。
 
 ## 当前边界
 

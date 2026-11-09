@@ -320,6 +320,119 @@ class PatientMemoryVectorStore:
         )
         return {"counts": {row[0]: row[1] for row in counts}, "latest": latest_job}
 
+    def request_patient_deletion(self, patient_id: str) -> None:
+        """先关掉记忆写入，再把完整删除交给后台队列。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT INTO patient_memory_preferences(patient_id, enabled, updated_at)
+                   VALUES (?, 0, ?)
+                   ON CONFLICT(patient_id) DO UPDATE SET enabled=0, updated_at=excluded.updated_at""",
+                (patient_id, now),
+            )
+            connection.execute(
+                """INSERT INTO patient_memory_deletion_jobs(patient_id, status, attempts, created_at, run_after)
+                   VALUES (?, 'pending', 0, ?, ?)
+                   ON CONFLICT(patient_id) DO UPDATE SET status='pending', attempts=0,
+                       created_at=excluded.created_at, run_after=excluded.run_after,
+                       started_at=NULL, last_error=NULL""",
+                (patient_id, now, now),
+            )
+
+    def set_patient_memory_enabled(self, patient_id: str, enabled: bool) -> None:
+        """保存患者的记忆开关；待处理删除任务完成前仍不开放记忆。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT INTO patient_memory_preferences(patient_id, enabled, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(patient_id) DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at""",
+                (patient_id, int(enabled), now),
+            )
+
+    def patient_memory_enabled(self, patient_id: str) -> bool:
+        with self._connection() as connection:
+            preference = connection.execute(
+                "SELECT enabled FROM patient_memory_preferences WHERE patient_id=?", (patient_id,)
+            ).fetchone()
+            deletion = connection.execute(
+                "SELECT 1 FROM patient_memory_deletion_jobs WHERE patient_id=? AND status IN ('pending', 'processing')",
+                (patient_id,),
+            ).fetchone()
+        return (preference is None or bool(preference[0])) and deletion is None
+
+    def patient_deletion_pending(self, patient_id: str) -> bool:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM patient_memory_deletion_jobs WHERE patient_id=? "
+                "AND status IN ('pending', 'processing')", (patient_id,),
+            ).fetchone()
+        return row is not None
+
+    def recover_patient_deletion_jobs(self) -> None:
+        """服务重启后，把上次中断的清理任务放回队列。"""
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_deletion_jobs SET status='pending', started_at=NULL "
+                "WHERE status='processing'"
+            )
+
+    def claim_patient_deletion_job(self) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT patient_id, attempts FROM patient_memory_deletion_jobs "
+                "WHERE status='pending' AND run_after<=? ORDER BY created_at LIMIT 1", (now,),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                "UPDATE patient_memory_deletion_jobs SET status='processing', started_at=? WHERE patient_id=?",
+                (now, row[0]),
+            )
+        return {"patient_id": row[0], "attempts": row[1]}
+
+    def retry_patient_deletion(self, job: dict[str, Any], error: Exception) -> None:
+        attempts = int(job["attempts"]) + 1
+        delay = min(3600, 5 * (2 ** min(attempts - 1, 9)))
+        run_after = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_deletion_jobs SET status='pending', attempts=?, run_after=?, "
+                "started_at=NULL, last_error=? WHERE patient_id=?",
+                (attempts, run_after.isoformat(), str(error)[:500], job["patient_id"]),
+            )
+
+    def defer_patient_deletion(self, job: dict[str, Any], delay_seconds: int) -> None:
+        """患者仍有运行时只延后清理，不记作失败。"""
+        run_after = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_deletion_jobs SET status='pending', run_after=?, started_at=NULL "
+                "WHERE patient_id=?",
+                (run_after.isoformat(), job["patient_id"]),
+            )
+
+    def finish_patient_deletion(self, patient_id: str) -> None:
+        """清除患者记忆数据，并保留关闭状态和清理任务记录。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            row_ids = connection.execute(
+                "SELECT rowid FROM patient_memory_vectors WHERE patient_id=?", (patient_id,)
+            ).fetchall()
+            connection.executemany("DELETE FROM patient_memory_vectors WHERE rowid=?", row_ids)
+            for table in (
+                "patient_long_term_memories", "patient_long_term_profiles",
+                "patient_memory_retrievals", "patient_memory_extraction_jobs",
+            ):
+                connection.execute(f"DELETE FROM {table} WHERE patient_id=?", (patient_id,))
+            connection.execute(
+                "UPDATE patient_memory_deletion_jobs SET status='done', finished_at=?, started_at=NULL, "
+                "last_error=NULL WHERE patient_id=?",
+                (now, patient_id),
+            )
+
     def remember(
         self, patient_id: str, text: str, source: str, category: str = "preference",
         importance: int = 3, expires_in_days: int | None = None,
@@ -348,6 +461,18 @@ class PatientMemoryVectorStore:
         now = datetime.now(timezone.utc)
         expires_at = (now + timedelta(days=expires_in_days)).isoformat() if expires_in_days else None
         with self._connection() as connection:
+            # 和删除请求共用 SQLite 写锁，防止旧抽取任务在清理后补写记忆。
+            connection.commit()
+            connection.execute("BEGIN IMMEDIATE")
+            preference = connection.execute(
+                "SELECT enabled FROM patient_memory_preferences WHERE patient_id=?", (patient_id,)
+            ).fetchone()
+            deletion = connection.execute(
+                "SELECT 1 FROM patient_memory_deletion_jobs WHERE patient_id=? "
+                "AND status IN ('pending', 'processing')", (patient_id,),
+            ).fetchone()
+            if (preference is not None and not preference[0]) or deletion is not None:
+                return
             status = "active"
             if supersedes_id:
                 prior = connection.execute(
@@ -487,21 +612,6 @@ class PatientMemoryVectorStore:
                 (vector, entry_id, patient_id, kind, text, source, created_at),
             )
 
-    def delete_patient(self, patient_id: str) -> None:
-        with self._connection() as connection:
-            row_ids = connection.execute(
-                "SELECT rowid FROM patient_memory_vectors WHERE patient_id = ?", (patient_id,)
-            ).fetchall()
-            connection.executemany(
-                "DELETE FROM patient_memory_vectors WHERE rowid = ?",
-                row_ids,
-            )
-            for table in (
-                "patient_long_term_memories", "patient_long_term_profiles",
-                "patient_memory_retrievals", "patient_memory_extraction_jobs",
-            ):
-                connection.execute(f"DELETE FROM {table} WHERE patient_id=?", (patient_id,))
-
     def _embed(self, text: str) -> list[float]:
         with self._model_lock:
             if self._embedder is None:
@@ -593,6 +703,18 @@ class PatientMemoryVectorStore:
                 connection.execute(
                     "CREATE INDEX IF NOT EXISTS idx_patient_memory_jobs_due "
                     "ON patient_memory_extraction_jobs(status, run_after, id)"
+                )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS patient_memory_preferences (
+                        patient_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL
+                    )"""
+                )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS patient_memory_deletion_jobs (
+                        patient_id TEXT PRIMARY KEY, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL, run_after TEXT NOT NULL, started_at TEXT,
+                        finished_at TEXT, last_error TEXT
+                    )"""
                 )
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS patient_long_term_profiles (

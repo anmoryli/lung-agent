@@ -17,6 +17,7 @@ from backend.agents.patient.registry import PatientAgentRegistry
 from backend.agents.patient.tools import create_patient_tools
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
 from backend.integrations.mcp.patient_fhir import mcp_transport, patient_id_from_context
+from backend.runtime.active_runs import active_runs
 from backend.runtime.async_runner import run_async
 from backend.runtime.clock import current_time_context
 
@@ -166,12 +167,25 @@ class PatientMainAgent(RoleMainAgent):
         )
 
         memory = self.memory_store
-        memory_enabled = self._memory_enabled(context, message)
+        memory_requested = self._memory_enabled(context, message)
+        if not memory_requested:
+            active_runs.request_patient_deletion(patient_id)
+            try:
+                await asyncio.to_thread(memory.request_patient_deletion, patient_id)
+            except Exception:
+                active_runs.cancel_patient_deletion_request(patient_id)
+                raise
+            memory_enabled = False
+        else:
+            if context.get("memoryConsent") is True:
+                await asyncio.to_thread(memory.set_patient_memory_enabled, patient_id, True)
+            memory_enabled = await asyncio.to_thread(memory.patient_memory_enabled, patient_id)
         if not memory_enabled:
-            await asyncio.to_thread(memory.delete_patient, patient_id)
+            long_term_profile = {"summary": "暂无已确认的长期偏好或服务安排。"}
         elif on_state is not None:
             update_state("正在查找相关历史记忆")
-        long_term_profile = await asyncio.to_thread(memory.build_long_term_profile, patient_id)
+        if memory_enabled:
+            long_term_profile = await asyncio.to_thread(memory.build_long_term_profile, patient_id)
         recalled = await asyncio.to_thread(
             memory.search, patient_id, message, 4, thread_id
         ) if memory_enabled else []

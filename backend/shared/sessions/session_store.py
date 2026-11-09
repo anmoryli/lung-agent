@@ -96,6 +96,18 @@ class PatientSessionStore:
             result[key] = json.loads(result[key])
         return result
 
+    def delete_patient(self, patient_id: str) -> None:
+        """删除患者会话目录；checkpoint 由后台清理任务单独处理。"""
+        with self._connect() as connection:
+            connection.execute("DELETE FROM patient_sessions WHERE patient_id=?", (patient_id,))
+
+    def thread_ids_for_patient(self, patient_id: str) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT thread_id FROM patient_sessions WHERE patient_id=?", (patient_id,)
+            ).fetchall()
+        return [row[0] for row in rows]
+
     def get_selected_model(self) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(

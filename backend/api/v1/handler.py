@@ -367,15 +367,35 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         context["_model_max_output_tokens"] = selected_model["max_output_tokens"]
 
         request_messages = _messages_from_run_input(run_input)
-        previous_session = session_store.get(run_input.thread_id, patient_id)
-        session_store.save(
-            run_input.thread_id, patient_id, request_messages, status="running",
-            agent_state=(previous_session or {}).get("agent_state"),
-            pending_interrupts=(previous_session or {}).get("pending_interrupts"),
-        )
-        progress: dict[str, Any] = {"state": {}, "answer": "", "activities": {}}
         try:
             agent = gateway.get_agent("patient")
+            if agent.memory_store.patient_deletion_pending(patient_id):
+                active_runs.request_patient_deletion(patient_id)
+        except Exception:
+            logging.exception("检查患者删除状态失败 patient=%s", patient_id)
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "暂时无法确认患者数据状态。"})
+            return
+        previous_session = session_store.get(run_input.thread_id, patient_id)
+        events: queue.Queue = queue.Queue()
+        if not active_runs.reserve(run_input.run_id, run_input.thread_id, patient_id, events):
+            self._send_json(
+                HTTPStatus.CONFLICT,
+                {"error": "同一个 threadId 只能同时运行一个 Agent 请求，或患者数据正在后台清理。"},
+            )
+            return
+        try:
+            session_store.save(
+                run_input.thread_id, patient_id, request_messages, status="running",
+                agent_state=(previous_session or {}).get("agent_state"),
+                pending_interrupts=(previous_session or {}).get("pending_interrupts"),
+            )
+        except Exception:
+            active_runs.finish(run_input.run_id)
+            logging.exception("保存患者会话失败 patient=%s thread=%s", patient_id, run_input.thread_id)
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "患者会话保存失败。"})
+            return
+        progress: dict[str, Any] = {"state": {}, "answer": "", "activities": {}}
+        try:
             context["conversationId"] = run_input.thread_id
             context["_task_key"] = run_input.run_id
             if active_runs.take_interruption(run_input.thread_id):
@@ -389,15 +409,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     }
                     for item in run_input.resume
                 ]
-            events: queue.Queue = queue.Queue()
             push_state = os.getenv("AGENT_AGUI_PUSH_STATE", "true").strip().lower() in {"1", "true", "yes", "on"}
-            if not active_runs.reserve(run_input.run_id, run_input.thread_id, events):
-                session_store.save(run_input.thread_id, patient_id, request_messages, status="ready")
-                self._send_json(
-                    HTTPStatus.CONFLICT,
-                    {"error": "同一个 threadId 只能同时运行一个 Agent 请求，或 runId 已被占用。"},
-                )
-                return
 
             async def run_patient():
                 def send_state(snapshot: dict) -> None:

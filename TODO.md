@@ -1,5 +1,13 @@
 # Agent Service TODO
 
+## 患者记忆删除同步覆盖会话与 checkpoint
+
+- [ ] 将患者删除请求写入 SQLite 持久队列，并立即关闭该患者的记忆写入。
+- [ ] 后台等待该患者现有 Agent 请求和会话保存完成，再删除会话、LangGraph checkpoint 与记忆数据。
+- [ ] 清理期间阻止新请求进入，避免已删除的数据被重新写回。
+- [x] 更新记忆存储与会话存储说明。
+- [x] 静态检查、复核改动并提交。
+
 ## DeepSeek 记忆抽取结构化输出兼容
 
 - [x] 核对 DeepSeek Thinking 模式和 JSON Output 官方接口约束。
