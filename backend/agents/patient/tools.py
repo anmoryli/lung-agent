@@ -6,6 +6,7 @@ import json
 from typing import Callable
 
 from backend.agents.patient.registry import PatientAgentRegistry
+from backend.runtime.clock import create_current_time_tool
 
 
 def create_patient_tools(
@@ -22,7 +23,7 @@ def create_patient_tools(
         """查看当前已注册的患者专科 Agent 及职责，分流前先查这里。"""
         return json.dumps(registry.summaries(query), ensure_ascii=False)
 
-    tools = [discover_patient_agents]
+    tools = [discover_patient_agents, create_current_time_tool()]
     if not memory_enabled:
         return tools
 

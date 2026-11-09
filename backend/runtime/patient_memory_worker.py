@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
+from backend.runtime.clock import current_time_context
 from backend.shared.sessions.session_store import PatientSessionStore
 
 
@@ -99,7 +100,7 @@ class PatientMemoryExtractionWorker:
         extractor = model.with_structured_output(MemoryExtractionResult, method="function_calling")
         active_memories = self.memory.active_long_term_memories(job["patient_id"])
         result = extractor.invoke(
-            self._prompt(source, active_memories),
+            self._prompt(source, active_memories, current_time_context()),
             config={"run_name": "patient_memory_extraction", "tags": ["patient-memory", "scheduled-extraction"]},
         )
 
@@ -141,7 +142,7 @@ class PatientMemoryExtractionWorker:
         return candidate.explicit or bool(candidate.quote.strip() and candidate.quote.strip() in source)
 
     @staticmethod
-    def _prompt(source: str, active_memories: list[dict]) -> str:
+    def _prompt(source: str, active_memories: list[dict], time_context: str = "") -> str:
         return """你负责从患者本轮原话里整理长期记忆候选。显式记忆要求优先级最高；普通事实只在稳定、跨会话有用时提取。
 
 规则：
@@ -152,10 +153,14 @@ class PatientMemoryExtractionWorker:
 - 如果用户明确更新现有事实，relation=supersedes；冲突但不能判断新旧时 relation=conflicts。只有确实对应现有条目时才填写 related_memory_id。
 - 不确定就返回空列表。不要为了填满结果编造内容。
 
+本轮时间基准：
+{time_context}
+
 现有有效记忆：
 {memories}
 
 本轮用户原话：
 {source}""".format(
+            time_context=time_context,
             memories=json.dumps(active_memories, ensure_ascii=False), source=source,
         )

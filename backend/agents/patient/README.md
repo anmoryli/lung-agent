@@ -5,7 +5,7 @@
 ```text
 patient/
 ├── agent.py                 患者主 Agent：识别诉求、查工具目录、派发一次专科任务
-├── tools.py                 主 Agent 自己能用的 3 个业务工具
+├── tools.py                 主 Agent 自己能用的业务工具
 ├── specialist.py            专科定义的数据结构；它本身不运行模型
 ├── registry.py              扫描各专科目录，把定义转换成 DeepAgents 子 Agent 配置
 ├── symptom_safety_triage/
@@ -27,12 +27,15 @@ patient/
 | 工具 | 用途 |
 |---|---|
 | `discover_patient_agents` | 查找专科名称和职责摘要，不返回全部 MCP schema |
+| `get_current_time` | 获取当前日期、时间和时区；记忆关闭时仍可用 |
 | `search_patient_history` | 按语义检索这位合成患者的会话归档 |
 | `save_patient_memory` | 用户要求记住信息时，写入长期记忆；停用记忆时不注册 |
 | DeepAgents `task` | 把当前任务交给一个已注册的专科子 Agent |
 | DeepAgents `write_todos` | 维护当前任务计划；AG-UI 状态推送开启时同步显示计划 |
 
 `task` 和 `write_todos` 是 DeepAgents 的内建工具。FHIR MCP 的查询和写入工具不直接给主 Agent，因此主 Agent 不能自行读写病历。
+
+每次请求都会按 `AGENT_TIMEZONE` 获取一次当前时间，连同相对日期计算规则注入患者主 Agent 和专科 Agent 的提示词；记忆抽取模型也会收到同一时区下的当前时间。主 Agent 与专科 Agent 都可以主动调用 `get_current_time` 刷新时刻。默认时区为 `Asia/Shanghai`。
 
 ## 专科子 Agent 的工具白名单
 

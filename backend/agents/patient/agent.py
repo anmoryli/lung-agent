@@ -18,6 +18,7 @@ from backend.agents.patient.tools import create_patient_tools
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
 from backend.integrations.mcp.patient_fhir import mcp_transport, patient_id_from_context
 from backend.runtime.async_runner import run_async
+from backend.runtime.clock import current_time_context
 
 
 PATIENT_PROMPT = """
@@ -31,6 +32,7 @@ PATIENT_PROMPT = """
 5. 一次只委派一个专科助手，不让子助手互相委派。只展示与当前请求有关的信息，不附带其他科室、护理或检查安排。
 6. 写入工具会触发确认。调用前用一句话说明要提交的内容，然后等待确认卡；不要额外再问一次口头同意。患者已明确答应本轮提出的具体写入申请时，直接调用写入工具。预约申请提交后是“待医院确认”，不能说成已经挂号成功。系统没有号源查询能力时，不得声称查到号源或保证时间。
 7. 回复简短、易懂，只给当前结论和下一步。医疗判断由医生确认；不诊断、不建议停换药、不决定检查必要性，不承诺资格、费用或服务可用。
+8. 每轮系统提示词会附带当前日期时间和时区，回答“明天/下周/现在”等问题时以此为准；需要刷新时可调用 get_current_time。
 
 患者提到严重呼吸困难、胸痛、咯血、高热寒战、严重腹泻或自伤想法时，优先建议立即联系当地急救或就近急诊。不要把高风险情况说成在家观察即可，也不要输出内部风险标签、工具名、Agent 名或推理过程。
 
@@ -127,6 +129,7 @@ class PatientMainAgent(RoleMainAgent):
             raise AgentConfigurationError("当前模型没有可验证的上下文窗口资料。")
 
         patient_id = patient_id_from_context(context)
+        time_context = current_time_context()
         task_key = str(context.get("_task_key", "patient-task"))[:128]
         thread_id = self._thread_id(context, patient_id, task_key)
         storage = Path(os.getenv("AGENT_STORAGE_PATH", "./storage"))
@@ -182,7 +185,7 @@ class PatientMainAgent(RoleMainAgent):
             available = {item.name: item for item in await adapter.list_tools()}
             registry = PatientAgentRegistry()
             subagents = registry.deepagent_specs(
-                available, patient_id, task_key, long_term_profile["summary"]
+                available, patient_id, task_key, long_term_profile["summary"], time_context
             )
             tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
             async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
@@ -190,7 +193,9 @@ class PatientMainAgent(RoleMainAgent):
                 graph = create_deep_agent(
                     model=streaming_model,
                     tools=tools,
-                    system_prompt=self._prompt_with_context(recalled, long_term_profile["summary"]),
+                    system_prompt=self._prompt_with_context(
+                        recalled, long_term_profile["summary"], time_context
+                    ),
                     subagents=subagents,
                     checkpointer=checkpointer,
                 )
@@ -406,8 +411,12 @@ class PatientMainAgent(RoleMainAgent):
         return {key: value for key, value in context.items() if key not in private_keys}
 
     @staticmethod
-    def _prompt_with_context(recalled: list[dict[str, str]], long_term_profile: str = "") -> str:
+    def _prompt_with_context(
+        recalled: list[dict[str, str]], long_term_profile: str = "", time_context: str = ""
+    ) -> str:
         text = PATIENT_PROMPT
+        if time_context:
+            text += "\n\n本轮时间基准（服务自动获取）：\n" + time_context
         text += "\n\n当前患者长期记忆摘要（每轮更新，过期和低权重记忆不放入此处）：\n" + (
             long_term_profile or "暂无已确认的长期偏好或服务安排。"
         )

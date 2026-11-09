@@ -7,6 +7,8 @@ import os
 from functools import cached_property
 from typing import Any
 
+from backend.runtime.clock import create_current_time_tool, current_time_context
+
 
 class AgentConfigurationError(RuntimeError):
     """模型配置不完整时给 API 返回清楚的提示。"""
@@ -57,13 +59,16 @@ class RoleMainAgent:
         )
         return create_deep_agent(
             model=model,
-            tools=[],
-            system_prompt=self.system_prompt,
+            tools=[create_current_time_tool()],
+            system_prompt=(
+                self.system_prompt
+                + "\n\n服务每轮都会附上当前时间；需要刷新当前时刻时调用 get_current_time。"
+            ),
         )
 
     def invoke(self, message: str, context: dict[str, Any]) -> str:
         """把用户问题和 Gateway 提供的上下文交给 DeepAgents。"""
-        prompt = message
+        prompt = message + "\n\n本轮时间基准（服务自动提供）：\n" + current_time_context()
         if context:
             prompt += "\n\n补充业务上下文（仅根据这些已提供信息回答）：\n"
             prompt += json.dumps(context, ensure_ascii=False, indent=2)

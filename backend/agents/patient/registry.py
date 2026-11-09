@@ -10,6 +10,7 @@ from typing import Any
 
 from backend.agents import patient as patient_package
 from backend.agents.patient.specialist import PatientSpecialist
+from backend.runtime.clock import create_current_time_tool
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ class PatientAgentRegistry:
 
     def deepagent_specs(
         self, available_tools: dict[str, Any], patient_id: str, task_key: str,
-        long_term_profile: str = "",
+        long_term_profile: str = "", time_context: str = "",
     ) -> list[dict[str, Any]]:
         """把已发现的 Agent 转成 DeepAgents 原生 task 工具可委派的配置。"""
         from backend.integrations.mcp.patient_fhir import WRITE_TOOLS, make_patient_tool
@@ -67,7 +68,8 @@ class PatientAgentRegistry:
             missing = [name for name in required if name not in available_tools]
             if missing:
                 raise RuntimeError("FHIR MCP 服务缺少患者流程工具：" + ", ".join(missing))
-            tools = [make_patient_tool(available_tools[name], patient_id, task_key) for name in required]
+            tools = [create_current_time_tool()]
+            tools.extend(make_patient_tool(available_tools[name], patient_id, task_key) for name in required)
             interrupt_on = {
                 tool.name: {"allowed_decisions": ["approve", "reject"]}
                 for tool in tools
@@ -79,7 +81,7 @@ class PatientAgentRegistry:
                 "system_prompt": specialist.system_prompt + (
                     "\n\n当前患者的长期记忆摘要（仅供个性化沟通，过期/低权重内容不会注入）：\n" + long_term_profile
                     if long_term_profile else ""
-                ),
+                ) + ("\n\n本轮时间基准：\n" + time_context if time_context else ""),
                 "tools": tools,
                 "interrupt_on": interrupt_on,
                 "mode": "isolated",
