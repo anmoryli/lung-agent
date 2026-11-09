@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Callable, Literal
 
 from backend.agents.patient.registry import PatientAgentRegistry
 from backend.integrations.knowledge.search import search_cancer_knowledge as query_cancer_knowledge
@@ -25,9 +25,9 @@ def create_patient_tools(
         return json.dumps(registry.summaries(query), ensure_ascii=False)
 
     @tool
-    def search_cancer_knowledge(query: str) -> str:
-        """按需搜索肺癌相关科普资料；返回 BM25、向量、GraphRAG 命中结果及原始来源。"""
-        return json.dumps(query_cancer_knowledge(query), ensure_ascii=False)
+    def search_cancer_knowledge(query: str, mode: Literal["local", "global"] = "local") -> str:
+        """按需检索肺癌科普资料；具体问题用 local，全库主题概览用 global，结果保留原始来源。"""
+        return json.dumps(query_cancer_knowledge(query, mode=mode), ensure_ascii=False)
 
     tools = [discover_patient_agents, search_cancer_knowledge, create_current_time_tool()]
     if not memory_enabled:
