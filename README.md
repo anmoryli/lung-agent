@@ -156,3 +156,22 @@ Gateway 是 HTTP 和任务编排唯一入口。每次患者请求都会读取专
 ## AG-UI 文档
 
 AG-UI 官方文档源码快照放在 docs/references/ag-ui/，包含 1.0 和 draft 规范、SDK 页面及配套资源；页面清单、来源版本和 MIT 许可也一并保留。SSE 服务端接入重点见 docs/references/ag-ui/README.md。
+
+## 肺癌知识检索
+
+患者主 Agent 带有一个按需调用的 `search_cancer_knowledge` 工具。只有在问题需要肺癌一般知识、术语解释或科普资料时才会触发；知识平台返回 BM25、向量和图谱检索融合结果，并保留原始来源链接。患者报告、预约等个人信息仍走 FHIR 专科工具。
+
+先启动独立知识平台，再启动 Agent Service：
+
+```powershell
+cd ..\knowledge-platform
+docker compose up -d --build
+cd ..\agent-service
+docker compose up -d --build agent-service
+```
+
+Docker 默认通过 `host.docker.internal:8020` 访问知识平台。可用 `KNOWLEDGE_PLATFORM_URL` 覆盖；本机直接运行 Agent 时通常设为 `http://127.0.0.1:8020`。
+
+### 实际运行
+
+知识平台可用本机 `deploy.ps1` 或它自己的 Docker Compose 启动，二者默认都占用 8020 端口，只运行一种。Agent 容器通过 `host.docker.internal:8020` 访问；本机直接运行 Agent 时配置 `KNOWLEDGE_PLATFORM_URL=http://127.0.0.1:8020`。
