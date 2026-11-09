@@ -4,28 +4,37 @@ OpenClaw 的 Agent as a Service 最小可运行版。DeepAgents 提供四个角�
 
 ## 本地启动
 
-需要 Python 3.10 或更高版本，以及一个支持工具调用的 OpenAI 或兼容模型服务。
+需要 Python 3.10 或更高版本，以及 DeepSeek API Key。
 
 ~~~powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 $env:OPENAI_API_KEY = "填写模型服务密钥"
-$env:DEEPAGENTS_MODEL = "openai:gpt-4.1-mini"
+$env:OPENAI_BASE_URL = "https://api.deepseek.com"
+$env:DEEPAGENTS_MODEL = "openai:deepseek-flash"
 python -m backend.app
 ~~~
 
-如果使用 OpenAI 兼容服务，再设置它的 API 地址：
+`DEEPAGENTS_MODEL` 直接传给 `create_deep_agent(model=...)`。DeepAgents 通过现有的 `langchain-openai` 接入 DeepSeek 的 OpenAI 兼容 API。
+
+## LangSmith 追踪
+
+LangSmith 是可选项。Docker 启动时会读取 `.env`；需要追踪时配置以下变量：
 
 ~~~powershell
-$env:OPENAI_BASE_URL = "https://你的模型服务地址/v1"
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=你的LangSmith密钥
+LANGSMITH_PROJECT=lung-agent
 ~~~
+
+追踪会记录模型调用内容。当前项目使用合成数据，接入真实患者数据前要先确定数据处理和隐私规则。
 
 服务启动后，健康检查地址是 <http://localhost:8010/health>。
 
 ## Docker 启动
 
-复制 .env.example 为 .env，填入模型服务密钥和模型名，然后执行：
+复制 .env.example 为 .env，填入 DeepSeek API Key，然后执行：
 
 ~~~powershell
 docker compose up -d --build
