@@ -1,0 +1,821 @@
+{
+  "source_repository": "https://github.com/ag-ui-protocol/ag-ui.git",
+  "source_site": "https://docs.ag-ui.com",
+  "site_index": "https://docs.ag-ui.com/llms.txt",
+  "branch": "main",
+  "revision": "dbfbddb7b3b898dc120b90610c941173b982757f",
+  "license": "MIT",
+  "retrieved_at": "2026-11-09T02:06:48+00:00",
+  "file_count": 202,
+  "page_count": 174,
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 2162
+    },
+    {
+      "path": ".prettierignore",
+      "bytes": 1
+    },
+    {
+      "path": ".prettierrc",
+      "bytes": 275
+    },
+    {
+      "path": "ag_ui.md",
+      "bytes": 4347
+    },
+    {
+      "path": "agentic-protocols.mdx",
+      "bytes": 1943
+    },
+    {
+      "path": "concepts/agents.mdx",
+      "bytes": 11466
+    },
+    {
+      "path": "concepts/architecture.mdx",
+      "bytes": 6586
+    },
+    {
+      "path": "concepts/capabilities.mdx",
+      "bytes": 14424
+    },
+    {
+      "path": "concepts/events.mdx",
+      "bytes": 40645
+    },
+    {
+      "path": "concepts/generative-ui-specs.mdx",
+      "bytes": 1319
+    },
+    {
+      "path": "concepts/interrupts.mdx",
+      "bytes": 20518
+    },
+    {
+      "path": "concepts/messages.mdx",
+      "bytes": 13140
+    },
+    {
+      "path": "concepts/metadata.mdx",
+      "bytes": 10481
+    },
+    {
+      "path": "concepts/middleware.mdx",
+      "bytes": 8064
+    },
+    {
+      "path": "concepts/reasoning.mdx",
+      "bytes": 14321
+    },
+    {
+      "path": "concepts/serialization.mdx",
+      "bytes": 6080
+    },
+    {
+      "path": "concepts/state.mdx",
+      "bytes": 8230
+    },
+    {
+      "path": "concepts/subagents.mdx",
+      "bytes": 19749
+    },
+    {
+      "path": "concepts/tools.mdx",
+      "bytes": 11587
+    },
+    {
+      "path": "development/contributing.mdx",
+      "bytes": 578
+    },
+    {
+      "path": "development/roadmap.mdx",
+      "bytes": 462
+    },
+    {
+      "path": "development/updates.mdx",
+      "bytes": 234
+    },
+    {
+      "path": "docs.json",
+      "bytes": 11408
+    },
+    {
+      "path": "drafts/generative-ui.mdx",
+      "bytes": 10036
+    },
+    {
+      "path": "drafts/meta-events.mdx",
+      "bytes": 5587
+    },
+    {
+      "path": "drafts/overview.mdx",
+      "bytes": 1495
+    },
+    {
+      "path": "favicon.svg",
+      "bytes": 865
+    },
+    {
+      "path": "icons/custom-icons.tsx",
+      "bytes": 31626
+    },
+    {
+      "path": "icons/index.tsx",
+      "bytes": 790
+    },
+    {
+      "path": "images/ag-ui-concept.png",
+      "bytes": 1212921
+    },
+    {
+      "path": "images/ag-ui-overview-with-partners-dark.png",
+      "bytes": 634934
+    },
+    {
+      "path": "images/ag-ui-overview-with-partners.png",
+      "bytes": 2355700
+    },
+    {
+      "path": "images/ai-protocol-stack.png",
+      "bytes": 135082
+    },
+    {
+      "path": "images/left-illustration.avif",
+      "bytes": 47688
+    },
+    {
+      "path": "integrations/google-adk-js.mdx",
+      "bytes": 4180
+    },
+    {
+      "path": "integrations/omnara.mdx",
+      "bytes": 4556
+    },
+    {
+      "path": "integrations.mdx",
+      "bytes": 5374
+    },
+    {
+      "path": "introduction.mdx",
+      "bytes": 29924
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1087
+    },
+    {
+      "path": "logo/AG-UI logo_dark.png",
+      "bytes": 2298
+    },
+    {
+      "path": "logo/AG-UI logo_light.png",
+      "bytes": 1399
+    },
+    {
+      "path": "logo/AG-UI logo_name_dark.png",
+      "bytes": 4693
+    },
+    {
+      "path": "logo/AG-UI logo_name_light.png",
+      "bytes": 3368
+    },
+    {
+      "path": "logo/ag-ui-dark.svg",
+      "bytes": 1106
+    },
+    {
+      "path": "logo/ag-ui-light.svg",
+      "bytes": 1108
+    },
+    {
+      "path": "logo/dotnet.svg",
+      "bytes": 1281
+    },
+    {
+      "path": "logo-alt.js",
+      "bytes": 1719
+    },
+    {
+      "path": "migrating-to-1-0.mdx",
+      "bytes": 23331
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 482518
+    },
+    {
+      "path": "package.json",
+      "bytes": 273
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "bytes": 262562
+    },
+    {
+      "path": "quickstart/applications.mdx",
+      "bytes": 1001
+    },
+    {
+      "path": "quickstart/clients.mdx",
+      "bytes": 17478
+    },
+    {
+      "path": "quickstart/introduction.mdx",
+      "bytes": 3025
+    },
+    {
+      "path": "quickstart/middleware.mdx",
+      "bytes": 11709
+    },
+    {
+      "path": "quickstart/server.mdx",
+      "bytes": 16466
+    },
+    {
+      "path": "README.md",
+      "bytes": 253
+    },
+    {
+      "path": "sdk/dart/client/client.mdx",
+      "bytes": 7109
+    },
+    {
+      "path": "sdk/dart/client/overview.mdx",
+      "bytes": 5511
+    },
+    {
+      "path": "sdk/dart/core/events.mdx",
+      "bytes": 12967
+    },
+    {
+      "path": "sdk/dart/core/overview.mdx",
+      "bytes": 6764
+    },
+    {
+      "path": "sdk/dart/core/types.mdx",
+      "bytes": 10106
+    },
+    {
+      "path": "sdk/dart/encoder/overview.mdx",
+      "bytes": 10677
+    },
+    {
+      "path": "sdk/dart/overview.mdx",
+      "bytes": 3849
+    },
+    {
+      "path": "sdk/dotnet/abstractions/events.mdx",
+      "bytes": 22797
+    },
+    {
+      "path": "sdk/dotnet/abstractions/multimodal-inputs.mdx",
+      "bytes": 9583
+    },
+    {
+      "path": "sdk/dotnet/abstractions/overview.mdx",
+      "bytes": 4382
+    },
+    {
+      "path": "sdk/dotnet/abstractions/types.mdx",
+      "bytes": 15597
+    },
+    {
+      "path": "sdk/dotnet/client/chat-client.mdx",
+      "bytes": 8572
+    },
+    {
+      "path": "sdk/dotnet/client/overview.mdx",
+      "bytes": 3677
+    },
+    {
+      "path": "sdk/dotnet/client/transport.mdx",
+      "bytes": 4892
+    },
+    {
+      "path": "sdk/dotnet/hosting/endpoints.mdx",
+      "bytes": 5295
+    },
+    {
+      "path": "sdk/dotnet/hosting/extensibility.mdx",
+      "bytes": 7092
+    },
+    {
+      "path": "sdk/dotnet/hosting/overview.mdx",
+      "bytes": 3531
+    },
+    {
+      "path": "sdk/go/client/overview.mdx",
+      "bytes": 3740
+    },
+    {
+      "path": "sdk/go/client/sse-client.mdx",
+      "bytes": 10717
+    },
+    {
+      "path": "sdk/go/core/events.mdx",
+      "bytes": 16556
+    },
+    {
+      "path": "sdk/go/core/overview.mdx",
+      "bytes": 1985
+    },
+    {
+      "path": "sdk/go/core/types.mdx",
+      "bytes": 10685
+    },
+    {
+      "path": "sdk/go/encoding/overview.mdx",
+      "bytes": 10276
+    },
+    {
+      "path": "sdk/go/errors/overview.mdx",
+      "bytes": 12809
+    },
+    {
+      "path": "sdk/go/overview.mdx",
+      "bytes": 5223
+    },
+    {
+      "path": "sdk/java/client/http-agent.mdx",
+      "bytes": 3927
+    },
+    {
+      "path": "sdk/java/client/overview.mdx",
+      "bytes": 2320
+    },
+    {
+      "path": "sdk/java/core/events.mdx",
+      "bytes": 6419
+    },
+    {
+      "path": "sdk/java/core/overview.mdx",
+      "bytes": 5294
+    },
+    {
+      "path": "sdk/java/core/types.mdx",
+      "bytes": 6917
+    },
+    {
+      "path": "sdk/java/overview.mdx",
+      "bytes": 8403
+    },
+    {
+      "path": "sdk/java/server/overview.mdx",
+      "bytes": 5361
+    },
+    {
+      "path": "sdk/java/server/spring-ai.mdx",
+      "bytes": 8390
+    },
+    {
+      "path": "sdk/java/server/spring.mdx",
+      "bytes": 4245
+    },
+    {
+      "path": "sdk/js/client/abstract-agent.mdx",
+      "bytes": 6267
+    },
+    {
+      "path": "sdk/js/client/compaction.mdx",
+      "bytes": 3514
+    },
+    {
+      "path": "sdk/js/client/http-agent.mdx",
+      "bytes": 2706
+    },
+    {
+      "path": "sdk/js/client/middleware.mdx",
+      "bytes": 9430
+    },
+    {
+      "path": "sdk/js/client/overview.mdx",
+      "bytes": 3438
+    },
+    {
+      "path": "sdk/js/client/subscriber.mdx",
+      "bytes": 12150
+    },
+    {
+      "path": "sdk/js/core/events.mdx",
+      "bytes": 28005
+    },
+    {
+      "path": "sdk/js/core/multimodal-inputs.mdx",
+      "bytes": 1997
+    },
+    {
+      "path": "sdk/js/core/overview.mdx",
+      "bytes": 1728
+    },
+    {
+      "path": "sdk/js/core/types.mdx",
+      "bytes": 16783
+    },
+    {
+      "path": "sdk/js/encoder.mdx",
+      "bytes": 48
+    },
+    {
+      "path": "sdk/js/overview.mdx",
+      "bytes": 0
+    },
+    {
+      "path": "sdk/js/proto.mdx",
+      "bytes": 46
+    },
+    {
+      "path": "sdk/kotlin/client/abstract-agent.mdx",
+      "bytes": 10904
+    },
+    {
+      "path": "sdk/kotlin/client/agui-agent.mdx",
+      "bytes": 6665
+    },
+    {
+      "path": "sdk/kotlin/client/http-agent.mdx",
+      "bytes": 9812
+    },
+    {
+      "path": "sdk/kotlin/client/overview.mdx",
+      "bytes": 5586
+    },
+    {
+      "path": "sdk/kotlin/client/stateful-agui-agent.mdx",
+      "bytes": 9449
+    },
+    {
+      "path": "sdk/kotlin/core/events.mdx",
+      "bytes": 16226
+    },
+    {
+      "path": "sdk/kotlin/core/overview.mdx",
+      "bytes": 10140
+    },
+    {
+      "path": "sdk/kotlin/core/types.mdx",
+      "bytes": 6055
+    },
+    {
+      "path": "sdk/kotlin/overview.mdx",
+      "bytes": 6147
+    },
+    {
+      "path": "sdk/kotlin/tools/overview.mdx",
+      "bytes": 8903
+    },
+    {
+      "path": "sdk/kotlin/tools/tool-executor.mdx",
+      "bytes": 12632
+    },
+    {
+      "path": "sdk/kotlin/tools/tool-registry.mdx",
+      "bytes": 9679
+    },
+    {
+      "path": "sdk/python/core/events.mdx",
+      "bytes": 30334
+    },
+    {
+      "path": "sdk/python/core/multimodal-inputs.mdx",
+      "bytes": 2036
+    },
+    {
+      "path": "sdk/python/core/overview.mdx",
+      "bytes": 1820
+    },
+    {
+      "path": "sdk/python/core/types.mdx",
+      "bytes": 18211
+    },
+    {
+      "path": "sdk/python/encoder/overview.mdx",
+      "bytes": 2407
+    },
+    {
+      "path": "sdk/ruby/core/capabilities.mdx",
+      "bytes": 20488
+    },
+    {
+      "path": "sdk/ruby/core/events.mdx",
+      "bytes": 40818
+    },
+    {
+      "path": "sdk/ruby/core/overview.mdx",
+      "bytes": 4448
+    },
+    {
+      "path": "sdk/ruby/core/types.mdx",
+      "bytes": 23817
+    },
+    {
+      "path": "sdk/ruby/encoder/overview.mdx",
+      "bytes": 2081
+    },
+    {
+      "path": "sdk/ruby/overview.mdx",
+      "bytes": 2799
+    },
+    {
+      "path": "sdk/rust/client/agent-trait.mdx",
+      "bytes": 3544
+    },
+    {
+      "path": "sdk/rust/client/http-agent.mdx",
+      "bytes": 3178
+    },
+    {
+      "path": "sdk/rust/client/overview.mdx",
+      "bytes": 2634
+    },
+    {
+      "path": "sdk/rust/client/subscriber.mdx",
+      "bytes": 4554
+    },
+    {
+      "path": "sdk/rust/core/events.mdx",
+      "bytes": 1749
+    },
+    {
+      "path": "sdk/rust/core/overview.mdx",
+      "bytes": 852
+    },
+    {
+      "path": "sdk/rust/core/types.mdx",
+      "bytes": 2837
+    },
+    {
+      "path": "sdk/rust/overview.mdx",
+      "bytes": 725
+    },
+    {
+      "path": "snippets/draft-notice.mdx",
+      "bytes": 260
+    },
+    {
+      "path": "snippets/since.mdx",
+      "bytes": 738
+    },
+    {
+      "path": "snippets/snippet-intro.mdx",
+      "bytes": 284
+    },
+    {
+      "path": "spec/1.0/architecture.mdx",
+      "bytes": 4223
+    },
+    {
+      "path": "spec/1.0/basic/capabilities.mdx",
+      "bytes": 9465
+    },
+    {
+      "path": "spec/1.0/basic/index.mdx",
+      "bytes": 6491
+    },
+    {
+      "path": "spec/1.0/basic/metadata.mdx",
+      "bytes": 3591
+    },
+    {
+      "path": "spec/1.0/basic/patterns/index.mdx",
+      "bytes": 2808
+    },
+    {
+      "path": "spec/1.0/basic/patterns/interrupt-resume.mdx",
+      "bytes": 8116
+    },
+    {
+      "path": "spec/1.0/basic/patterns/snapshots.mdx",
+      "bytes": 4352
+    },
+    {
+      "path": "spec/1.0/basic/patterns/streaming.mdx",
+      "bytes": 7444
+    },
+    {
+      "path": "spec/1.0/basic/processing.mdx",
+      "bytes": 10036
+    },
+    {
+      "path": "spec/1.0/basic/run-input.mdx",
+      "bytes": 7331
+    },
+    {
+      "path": "spec/1.0/basic/transports/http-protobuf.mdx",
+      "bytes": 3943
+    },
+    {
+      "path": "spec/1.0/basic/transports/http-sse.mdx",
+      "bytes": 3084
+    },
+    {
+      "path": "spec/1.0/basic/transports/index.mdx",
+      "bytes": 3493
+    },
+    {
+      "path": "spec/1.0/basic/versioning.mdx",
+      "bytes": 6960
+    },
+    {
+      "path": "spec/1.0/changelog.mdx",
+      "bytes": 7232
+    },
+    {
+      "path": "spec/1.0/events/activity.mdx",
+      "bytes": 4887
+    },
+    {
+      "path": "spec/1.0/events/index.mdx",
+      "bytes": 2910
+    },
+    {
+      "path": "spec/1.0/events/lifecycle.mdx",
+      "bytes": 12804
+    },
+    {
+      "path": "spec/1.0/events/passthrough.mdx",
+      "bytes": 3143
+    },
+    {
+      "path": "spec/1.0/events/reasoning.mdx",
+      "bytes": 6428
+    },
+    {
+      "path": "spec/1.0/events/state.mdx",
+      "bytes": 4196
+    },
+    {
+      "path": "spec/1.0/events/subagents.mdx",
+      "bytes": 6173
+    },
+    {
+      "path": "spec/1.0/events/text-messages.mdx",
+      "bytes": 4332
+    },
+    {
+      "path": "spec/1.0/events/tool-calls.mdx",
+      "bytes": 13232
+    },
+    {
+      "path": "spec/1.0/index.mdx",
+      "bytes": 6469
+    },
+    {
+      "path": "spec/1.0/schema-files.mdx",
+      "bytes": 2180
+    },
+    {
+      "path": "spec/1.0/schema.json",
+      "bytes": 94359
+    },
+    {
+      "path": "spec/1.0/schema.mdx",
+      "bytes": 107894
+    },
+    {
+      "path": "spec/draft/architecture.mdx",
+      "bytes": 4313
+    },
+    {
+      "path": "spec/draft/basic/capabilities.mdx",
+      "bytes": 9565
+    },
+    {
+      "path": "spec/draft/basic/index.mdx",
+      "bytes": 6617
+    },
+    {
+      "path": "spec/draft/basic/metadata.mdx",
+      "bytes": 3677
+    },
+    {
+      "path": "spec/draft/basic/patterns/index.mdx",
+      "bytes": 2894
+    },
+    {
+      "path": "spec/draft/basic/patterns/interrupt-resume.mdx",
+      "bytes": 8210
+    },
+    {
+      "path": "spec/draft/basic/patterns/snapshots.mdx",
+      "bytes": 4444
+    },
+    {
+      "path": "spec/draft/basic/patterns/streaming.mdx",
+      "bytes": 7532
+    },
+    {
+      "path": "spec/draft/basic/processing.mdx",
+      "bytes": 10110
+    },
+    {
+      "path": "spec/draft/basic/run-input.mdx",
+      "bytes": 7431
+    },
+    {
+      "path": "spec/draft/basic/transports/http-protobuf.mdx",
+      "bytes": 4029
+    },
+    {
+      "path": "spec/draft/basic/transports/http-sse.mdx",
+      "bytes": 3168
+    },
+    {
+      "path": "spec/draft/basic/transports/index.mdx",
+      "bytes": 3579
+    },
+    {
+      "path": "spec/draft/basic/versioning.mdx",
+      "bytes": 7042
+    },
+    {
+      "path": "spec/draft/changelog.mdx",
+      "bytes": 10502
+    },
+    {
+      "path": "spec/draft/events/activity.mdx",
+      "bytes": 4985
+    },
+    {
+      "path": "spec/draft/events/index.mdx",
+      "bytes": 3024
+    },
+    {
+      "path": "spec/draft/events/lifecycle.mdx",
+      "bytes": 12918
+    },
+    {
+      "path": "spec/draft/events/passthrough.mdx",
+      "bytes": 3227
+    },
+    {
+      "path": "spec/draft/events/reasoning.mdx",
+      "bytes": 8144
+    },
+    {
+      "path": "spec/draft/events/state.mdx",
+      "bytes": 4290
+    },
+    {
+      "path": "spec/draft/events/subagents.mdx",
+      "bytes": 6251
+    },
+    {
+      "path": "spec/draft/events/text-messages.mdx",
+      "bytes": 4438
+    },
+    {
+      "path": "spec/draft/events/tool-calls.mdx",
+      "bytes": 16893
+    },
+    {
+      "path": "spec/draft/index.mdx",
+      "bytes": 6597
+    },
+    {
+      "path": "spec/draft/schema-files.mdx",
+      "bytes": 2266
+    },
+    {
+      "path": "spec/draft/schema.json",
+      "bytes": 96251
+    },
+    {
+      "path": "spec/draft/schema.mdx",
+      "bytes": 110274
+    },
+    {
+      "path": "spec/README.md",
+      "bytes": 8549
+    },
+    {
+      "path": "style.css",
+      "bytes": 1869
+    },
+    {
+      "path": "superpowers/specs/2026-07-29-a2ui-maf-python-design.md",
+      "bytes": 7140
+    },
+    {
+      "path": "support.mdx",
+      "bytes": 754
+    },
+    {
+      "path": "talk-to-us.mdx",
+      "bytes": 1002
+    },
+    {
+      "path": "tutorials/cursor.mdx",
+      "bytes": 1099
+    },
+    {
+      "path": "tutorials/debugging.mdx",
+      "bytes": 3305
+    },
+    {
+      "path": "videos/Dojo-overview.mp4",
+      "bytes": 3243627
+    }
+  ]
+}

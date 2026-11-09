@@ -76,3 +76,7 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8010/api/v1/agents/patient
 - docs/architecture/agent-topology.md：请求流程和架构边界。
 
 主 Agent 目前只根据请求和传入上下文生成文字回复，没有接入子 Agent、FHIR、MCP、知识检索、登录授权或 ServiceCase 持久化。此阶段请使用合成数据。
+
+## AG-UI 文档
+
+AG-UI 官方文档源码快照放在 docs/references/ag-ui/，包含 1.0 和 draft 规范、SDK 页面及配套资源；页面清单、来源版本和 MIT 许可也一并保留。SSE 服务端接入重点见 docs/references/ag-ui/README.md。

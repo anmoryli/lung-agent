@@ -1,0 +1,57 @@
+---
+title: "Overview"
+description: "Connect to remote AG-UI agents from Java"
+---
+
+# java-client
+
+`java-client` lets you call a remote AG-UI endpoint as an ordinary `Agent`. It uses only the JDK `HttpClient` and the `Serializer` you inject.
+
+```xml
+<dependency>
+  <groupId>com.ag-ui.community</groupId>
+  <artifactId>java-client</artifactId>
+  <version>0.1.1</version>
+</dependency>
+```
+
+## What's inside
+
+| Type | Purpose |
+|------|---------|
+| `HttpAgent` | An `Agent` that POSTs a `RunAgentInput` as JSON and decodes the Server-Sent Events response into a `Flow.Publisher<Event>`. |
+| `HttpAgentException` | Passed to `onError` when the endpoint returns an HTTP error status. |
+
+The client keeps no state. It does not store messages or state between runs. Each call to `run` sends the `RunAgentInput` you give it, so your application decides how to keep the conversation history. One approach is to collect `TEXT_MESSAGE_*` events into an `AssistantMessage` and append it to the list for the next run.
+
+## Example
+
+This example uses a pattern-matching `switch`, which needs Java 21. On Java 17, use `instanceof` checks instead.
+
+```java
+Serializer serializer = new JacksonSerializer();
+Agent agent = new HttpAgent(URI.create("https://example.com/agent"), serializer);
+
+RunAgentInput input = new RunAgentInput(
+        "thread-1", UUID.randomUUID().toString(),
+        List.of(new UserMessage("msg-1", "Tell me a joke")),
+        List.of());
+
+CompletableFuture<Void> done = new CompletableFuture<>();
+agent.run(input).subscribe(new Flow.Subscriber<>() {
+    @Override public void onSubscribe(Flow.Subscription s) { s.request(Long.MAX_VALUE); }
+    @Override public void onNext(Event event) {
+        switch (event) {
+            case TextMessageContentEvent e -> System.out.print(e.delta());
+            case ToolCallStartEvent e      -> System.out.println("\n[tool] " + e.toolCallName());
+            case RunErrorEvent e           -> System.err.println("\n[error] " + e.message());
+            default                        -> { }
+        }
+    }
+    @Override public void onError(Throwable t) { done.completeExceptionally(t); }
+    @Override public void onComplete() { done.complete(null); }
+});
+done.join();
+```
+
+See [HttpAgent](/sdk/java/client/http-agent) for constructor options, error handling and threading.
