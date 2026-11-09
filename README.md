@@ -93,9 +93,11 @@ $body = @'
 curl.exe -N "http://localhost:8010/api/v1/agents/patient/ag-ui" -H "Content-Type: application/json" -H "Accept: text/event-stream" --data-binary $body
 ~~~
 
-停止生成可直接关闭 SSE 请求，服务会取消对应的 LangGraph 异步任务。也可以调用 `DELETE /api/v1/agents/patient/runs/{runId}?threadId={threadId}`。接着继续时复用原 `threadId`、换新的 `runId` 并提交最新用户消息；服务会把“用户已打断上一轮生成”的记录写进会话后再处理。浏览器接 AG-UI 客户端时可直接把该 SSE 地址作为 agent endpoint。
+停止生成可点页面里的“停止”按钮，也可关闭 SSE 请求或调用 `DELETE /api/v1/agents/patient/runs/{runId}?threadId={threadId}`。服务会取消这轮 LangGraph 异步任务，并记录该会话被打断。之后继续对话时复用原 `threadId`、换新的 `runId` 并发送新消息；服务先把“用户已打断上一轮生成”写进会话，再处理新消息。生成中断会结束当前模型调用；它和下面等待用户确认的暂停是两种不同状态。浏览器接 AG-UI 客户端时可直接把该 SSE 地址作为 agent endpoint。
 
-写入工具会以 AG-UI `RUN_FINISHED` 的 `outcome.type="interrupt"` 返回待确认项。确认后新建一个 run，带同一个 `threadId` 和 `resume` 数组，例如：
+写入工具在 LangGraph 工具边界触发 HITL 暂停。此时 FHIR MCP 还没有收到写请求；checkpoint 会保存待执行工具和会话状态。SSE 会先输出助手说明，再以 AG-UI `RUN_FINISHED` 的 `outcome.type="interrupt"` 返回操作摘要、interrupt ID 和确认字段。网页根据这个事件显示“确认执行”和“暂不执行”按钮。患者无需再发一条“我确认”消息。
+
+点按钮后，网页用原 `threadId`、新的 `runId` 和 `resume` 数组发起下一次 SSE 请求，例如：
 
 ~~~json
 {
@@ -109,7 +111,9 @@ curl.exe -N "http://localhost:8010/api/v1/agents/patient/ag-ui" -H "Content-Type
 }
 ~~~
 
-拒绝时将 `approved` 设为 `false`。服务端会校验该会话全部待确认项，再恢复写入节点。
+拒绝时将 `approved` 设为 `false`。服务端会核对 interrupt ID 是否覆盖该会话全部待确认项，并检查 `approved` 是布尔值，然后通过 LangGraph `Command(resume=...)` 恢复 checkpoint。批准时才会继续调用写工具，并由服务端绑定患者 ID、任务键和 `confirmed=true`；拒绝时恢复为拒绝结果，不会调用 FHIR 写入。预约申请保存后仍是“待医院确认”，不代表医院已经挂号成功。
+
+这套确认卡目前用于本地合成患者演示。当前入口没有用户登录鉴权，不能用它处理真实患者资料或真实预约。
 
 响应包含 taskKey、role、reply 和 cached。
 
