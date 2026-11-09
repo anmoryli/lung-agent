@@ -23,6 +23,13 @@ class Gateway:
         }
         self.idempotency = IdempotencyStore()
 
+    def get_agent(self, role: str):
+        """取出 Gateway 已注册的角色主 Agent，外部路由不直接挑选实现类。"""
+        agent = self.agents.get(role)
+        if agent is None:
+            raise UnknownRoleError(role)
+        return agent
+
     def invoke(
         self,
         role: str,
@@ -30,9 +37,7 @@ class Gateway:
         message: str,
         context: dict,
     ) -> tuple[str, bool]:
-        agent = self.agents.get(role)
-        if agent is None:
-            raise UnknownRoleError(role)
+        agent = self.get_agent(role)
         agent_context = context
         if role == "patient":
             agent_context = {**context, "_task_key": task_key}

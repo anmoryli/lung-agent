@@ -48,3 +48,13 @@
 - [x] 补充安全分流、患者 ID 限制、子 Agent 工具范围和 MCP 写参数绑定测试。
 - [x] 更新患者 Agent 与架构文档；Docker 重建与合成患者只读对话验证通过。
 - [x] 复核 PRD 对照、确认本地 `.env` 未纳入 Git，并完成最小粒度提交。
+
+## 患者 Agent 注册、记忆与 AG-UI 服务
+
+- [x] 将 8 个专科 Agent 定义放入既有专科目录，新增每轮发现的注册中心。
+- [x] 给主 Agent 注册专科发现、会话向量检索和非临床长期记忆工具；FHIR 工具按被选子 Agent 懒加载。
+- [x] 用 BGE Small 中文 + sqlite-vec 分开存长期记忆和会话归档，默认读取/归档。
+- [x] 用 AG-UI `RunAgentInput` 和官方 Python 编码器提供 SSE；增加生成取消、同线程继续和标准 `resume` 确认。
+- [x] 更新 AG-UI 调用、CORS、LangSmith 和本地 Docker 说明。
+- [ ] 对最新代码重新构建容器，检查健康状态、AG-UI 请求模型和事件编码。
+- [ ] 复核目录与文档，并提交本次代码。

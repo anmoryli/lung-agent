@@ -2,3 +2,6 @@ deepagents>=0.5.4,<1.0
 langchain-openai>=0.3.0,<2.0
 langchain[mcp]>=1.4.0,<2.0
 langgraph-checkpoint-sqlite>=3.0.0,<4.0
+ag-ui-protocol>=1.0.0,<2.0
+fastembed==0.9.1
+sqlite-vec==0.1.9

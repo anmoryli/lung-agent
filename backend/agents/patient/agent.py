@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
-import sqlite3
 from pathlib import Path
-from contextlib import contextmanager
-from typing import Any
+from functools import cached_property
+from typing import Any, Callable
 
 from backend.agents.base import AgentConfigurationError, RoleMainAgent
-from backend.agents.patient.subagents import PATIENT_SPECIALISTS
-from backend.integrations.patient_mcp import WRITE_TOOLS, make_patient_tool, mcp_transport, patient_id_from_context
+from backend.agents.patient.registry import PatientAgentRegistry
+from backend.agents.patient.tools import create_patient_tools
+from backend.integrations.memory.vector_store import PatientMemoryVectorStore
+from backend.integrations.mcp.patient_fhir import mcp_transport, patient_id_from_context
 from backend.runtime.async_runner import run_async
 
 
@@ -28,7 +30,9 @@ PATIENT_PROMPT = """
 
 严重呼吸困难、胸痛、咯血、高热寒战、严重腹泻或自伤想法出现时，优先建议立即联系当地急救或就近急诊。不要把高风险情况说成在家观察即可，也不要输出内部风险标签、工具名、Agent 名或推理过程。
 
-记忆只用于患者主动选择保存的沟通偏好；不把症状、报告、诊断、用药或家庭信息保存为长期记忆。患者服务当前只处理合成演示数据。
+默认从当前患者自己的对话归档中按语义召回相关内容，并归档新的对话。只允许在同一合成患者编号下检索；患者明确要求不再保存时停止归档并清除该患者的向量记忆。
+
+记忆默认可读取，不再询问授权。患者明确要求“记住”时，可以直接保存沟通偏好和服务安排；长期记忆不保存症状、报告、诊断或用药。
 """.strip()
 
 URGENT_TERMS = (
@@ -51,6 +55,13 @@ class PatientMainAgent(RoleMainAgent):
             return "你提到了需要尽快处理的情况。如果这些症状现在正在发生，或你担心自己会受伤，请马上联系当地急救或去最近的急诊；也请让身边可信任的人陪着你。"
         return run_async(self._invoke_patient(message, context))
 
+    def invoke_stream(self, message: str, context: dict[str, Any], on_delta: Callable[[str], None]) -> str:
+        if self._needs_urgent_care(message):
+            reply = "你提到了需要尽快处理的情况。如果这些症状现在正在发生，或你担心自己会受伤，请马上联系当地急救或去最近的急诊；也请让身边可信任的人陪着你。"
+            on_delta(reply)
+            return reply
+        return run_async(self._invoke_patient(message, context, on_delta))
+
     @staticmethod
     def _needs_urgent_care(message: str) -> bool:
         """按 PRD 的明确急症词先分流；紧急提醒不等模型判断。"""
@@ -67,7 +78,13 @@ class PatientMainAgent(RoleMainAgent):
                 position = message.find(term, position + len(term))
         return False
 
-    async def _invoke_patient(self, message: str, context: dict[str, Any]) -> str:
+    async def _invoke_patient(
+        self,
+        message: str,
+        context: dict[str, Any],
+        on_delta: Callable[[str], None] | None = None,
+        on_interrupt: Callable[[list[dict[str, Any]]], None] | None = None,
+    ) -> str:
         if not os.getenv("OPENAI_API_KEY", "").strip():
             raise AgentConfigurationError("请先配置 OPENAI_API_KEY。")
         model = os.getenv("DEEPAGENTS_MODEL", "openai:gpt-4.1-mini").strip()
@@ -75,10 +92,9 @@ class PatientMainAgent(RoleMainAgent):
             raise AgentConfigurationError("当前只接入 OpenAI 兼容模型，请使用 openai:模型名 格式。")
 
         patient_id = patient_id_from_context(context)
-        task_key = str(context.get("_task_key", "patient-task"))[:80]
+        task_key = str(context.get("_task_key", "patient-task"))[:128]
         thread_id = self._thread_id(context, patient_id, task_key)
         storage = Path(os.getenv("AGENT_STORAGE_PATH", "./storage"))
-        memory_database = storage / "patient-memory.sqlite3"
         checkpoint_database = storage / "patient-checkpoints.sqlite3"
         storage.mkdir(parents=True, exist_ok=True)
 
@@ -90,7 +106,6 @@ class PatientMainAgent(RoleMainAgent):
         )
         from langchain.mcp import MCPAdapter
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        from langgraph.store.sqlite import SqliteStore
         from langgraph.types import Command
 
         # 非患者角色仍然不带 task 工具；只有这里显式配置子 Agent 的图会启用委派。
@@ -102,151 +117,186 @@ class PatientMainAgent(RoleMainAgent):
             ),
         )
 
-        with self._sqlite_connection(memory_database) as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
-            store = SqliteStore(connection)
-            store.setup()
-            await self._save_explicit_preference(store, patient_id, context)
-            preference = self._load_preference(store, patient_id, context)
+        memory = self.memory_store
+        memory_enabled = self._memory_enabled(context, message)
+        if not memory_enabled:
+            await asyncio.to_thread(memory.delete_patient, patient_id)
+        recalled = await asyncio.to_thread(memory.search, patient_id, message, 4) if memory_enabled else []
+        memory_tool = lambda query: memory.search(patient_id, query, limit=5)
+        remember = lambda content: memory.remember(patient_id, content, thread_id)
 
-            async with MCPAdapter(mcp_transport()) as adapter:
-                available = {tool.name: tool for tool in await adapter.list_tools()}
-                subagents, _ = self._build_subagents(
-                    available, patient_id, task_key
+        async with MCPAdapter(mcp_transport()) as adapter:
+            available = {item.name: item for item in await adapter.list_tools()}
+            registry = PatientAgentRegistry()
+            subagents = registry.deepagent_specs(available, patient_id, task_key)
+            tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
+                await checkpointer.setup()
+                graph = create_deep_agent(
+                    model=model,
+                    tools=tools,
+                    system_prompt=self._prompt_with_context(recalled),
+                    subagents=subagents,
+                    checkpointer=checkpointer,
                 )
-                async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
-                    await checkpointer.setup()
-                    graph = create_deep_agent(
-                        model=model,
-                        tools=[],
-                        system_prompt=self._prompt_with_context(context, preference),
-                        subagents=subagents,
-                        checkpointer=checkpointer,
-                        store=store,
-                    )
-                    config = {"configurable": {"thread_id": thread_id}}
-                    approval = context.get("approvePendingWrite")
-                    if approval not in (None, True, False):
-                        raise ValueError("approvePendingWrite 只能是 true 或 false。")
-                    if approval is not None:
-                        state = await graph.aget_state(config)
-                        interrupts = [
-                            interrupt
-                            for task in state.tasks
-                            for interrupt in task.interrupts
-                        ]
-                        if not interrupts:
-                            raise ValueError("当前对话没有等待确认的写入。")
+                config = {"configurable": {"thread_id": thread_id}}
+                if context.get("continueAfterInterrupt"):
+                    from langchain_core.messages import HumanMessage
+
+                    await graph.aupdate_state(config, {"messages": [HumanMessage(
+                        content="（会话记录：用户已打断上一轮生成。请基于已有对话和当前消息继续处理。）"
+                    )]})
+                approval = context.get("approvePendingWrite")
+                agui_resume = context.get("_agui_resume")
+                if approval not in (None, True, False):
+                    raise ValueError("approvePendingWrite 只能是 true 或 false。")
+                if approval is not None or agui_resume is not None:
+                    state = await graph.aget_state(config)
+                    interrupts = [
+                        interrupt
+                        for task in state.tasks
+                        for interrupt in task.interrupts
+                    ]
+                    if not interrupts:
+                        raise ValueError("当前对话没有等待确认的写入。")
+                    if agui_resume is not None:
+                        if not isinstance(agui_resume, list):
+                            raise ValueError("AG-UI resume 必须是数组。")
+                        decisions = self._agui_interrupt_decisions(interrupts, agui_resume)
+                    else:
                         decision = {"type": "approve" if approval else "reject"}
                         if not approval:
                             decision["message"] = "患者没有同意这次写入。"
-                        resumed = await graph.ainvoke(
-                            Command(resume={interrupt.id: decision for interrupt in interrupts}),
-                            config=config,
-                        )
-                        return self._last_reply(resumed)
-
-                    prompt = message.strip()
-                    if context:
-                        prompt += "\n\n当前请求提供的业务上下文：\n" + json.dumps(
-                            self._public_context(context), ensure_ascii=False
-                        )
-                    result = await graph.ainvoke(
-                        {"messages": [{"role": "user", "content": prompt}]}, config=config
+                        decisions = {interrupt.id: decision for interrupt in interrupts}
+                    resumed = await graph.ainvoke(
+                        Command(resume=decisions),
+                        config=config,
                     )
-                    if self._has_pending_interrupt(result):
-                        return self._approval_summary(result)
-                    return self._last_reply(result)
+                    if self._has_pending_interrupt(resumed) and on_interrupt is not None:
+                        on_interrupt(self._agui_interrupts(resumed))
+                    reply = self._last_reply(resumed)
+                    if on_delta is not None:
+                        on_delta(reply)
+                    if memory_enabled:
+                        await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
+                    return reply
+
+                prompt = message.strip()
+                if context:
+                    prompt += "\n\n当前请求提供的业务上下文：\n" + json.dumps(
+                        self._public_context(context), ensure_ascii=False
+                    )
+                request_state = {"messages": [{"role": "user", "content": prompt}]}
+                if on_delta is None:
+                    result = await graph.ainvoke(request_state, config=config)
+                else:
+                    streamed_text = False
+                    async for event in graph.astream_events(request_state, config=config, version="v2"):
+                        metadata = event.get("metadata", {})
+                        if (
+                            event.get("event") == "on_chat_model_stream"
+                            and not metadata.get("langgraph_checkpoint_ns", "")
+                        ):
+                            chunk = event.get("data", {}).get("chunk")
+                            content = getattr(chunk, "content", "")
+                            if isinstance(content, str) and content:
+                                streamed_text = True
+                                on_delta(content)
+                    state = await graph.aget_state(config)
+                    result = dict(state.values)
+                    interrupts = [interrupt for task in state.tasks for interrupt in task.interrupts]
+                    if interrupts:
+                        result["__interrupt__"] = interrupts
+                reply = self._approval_summary(result) if self._has_pending_interrupt(result) else self._last_reply(result)
+                if self._has_pending_interrupt(result) and on_interrupt is not None:
+                    on_interrupt(self._agui_interrupts(result))
+                if on_delta is not None and not streamed_text:
+                    on_delta(reply)
+                if memory_enabled:
+                    await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "user", message)
+                    await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
+                return reply
 
     @staticmethod
     def _thread_id(context: dict[str, Any], patient_id: str, task_key: str) -> str:
         supplied = context.get("conversationId")
         if supplied is None:
             return f"patient:{patient_id}:{task_key}"
-        if not isinstance(supplied, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", supplied):
-            raise ValueError("context.conversationId 只能包含字母、数字、下划线和短横线，长度不超过 96。")
+        if not isinstance(supplied, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", supplied):
+            raise ValueError("context.conversationId 只能包含字母、数字、下划线、点、冒号和短横线，长度不超过 128。")
         return f"patient:{patient_id}:{supplied}"
 
     @staticmethod
-    @contextmanager
-    def _sqlite_connection(database: Path):
-        """每个请求独立开连接，线程间不共用 SQLite 连接。"""
-        connection = sqlite3.connect(database, timeout=30, check_same_thread=False)
-        try:
-            with connection:
-                yield connection
-        finally:
-            connection.close()
-
-    @staticmethod
     def _public_context(context: dict[str, Any]) -> dict[str, Any]:
-        private_keys = {"approvePendingWrite", "memoryConsent", "memoryPreference", "conversationId", "_task_key"}
+        private_keys = {"approvePendingWrite", "memoryConsent", "memoryPreference", "conversationId", "_task_key", "continueAfterInterrupt", "_agui_resume"}
         return {key: value for key, value in context.items() if key not in private_keys}
 
     @staticmethod
-    def _prompt_with_context(context: dict[str, Any], preference: dict[str, str] | None) -> str:
+    def _prompt_with_context(recalled: list[dict[str, str]]) -> str:
         text = PATIENT_PROMPT
-        if preference:
-            text += "\n\n患者同意保存的沟通偏好（仅用于表达方式）：" + json.dumps(preference, ensure_ascii=False)
+        if recalled:
+            text += "\n\n以下是同一合成患者此前对话的语义检索片段，只作上下文参考；与当前请求冲突时优先按当前请求处理：\n"
+            text += json.dumps(recalled, ensure_ascii=False)
         return text
 
     @staticmethod
-    async def _save_explicit_preference(store: Any, patient_id: str, context: dict[str, Any]) -> None:
-        # 演示服务没有登录鉴权，只把已标记同意且白名单内的偏好写入合成患者命名空间。
-        preference = context.get("memoryPreference")
-        namespace = ("patient-demo", patient_id, "behavioral")
+    def _memory_enabled(context: dict[str, Any], message: str = "") -> bool:
+        """默认为当前患者召回并归档；明确关闭时清除该演示患者的记忆。"""
         if context.get("memoryConsent") is False:
-            store.delete(namespace, "preferences")
-            return
-        if context.get("memoryConsent") is not True or not isinstance(preference, dict):
-            return
-        allowed = {"language", "communication_style", "accessibility"}
-        clean = {
-            key: value.strip()[:120]
-            for key, value in preference.items()
-            if key in allowed and isinstance(value, str) and value.strip()
-        }
-        if clean:
-            store.put(namespace, "preferences", clean)
+            return False
+        stop_phrases = ("不再保存", "不要保存", "别保存", "忘记我", "删除记忆", "清除记忆", "stop remembering", "forget me")
+        return not any(phrase in message.lower() for phrase in stop_phrases)
 
-    @staticmethod
-    def _load_preference(store: Any, patient_id: str, context: dict[str, Any]) -> dict[str, str] | None:
-        if context.get("memoryConsent") is not True:
-            return None
-        item = store.get(("patient-demo", patient_id, "behavioral"), "preferences")
-        return item.value if item else None
-
-    @staticmethod
-    def _build_subagents(available: dict[str, Any], patient_id: str, task_key: str) -> tuple[list[dict[str, Any]], dict[str, bool]]:
-        children: list[dict[str, Any]] = []
-        pending: dict[str, bool] = {}
-        for specialist in PATIENT_SPECIALISTS:
-            required = specialist.read_tools + specialist.write_tools
-            missing = [name for name in required if name not in available]
-            if missing:
-                raise AgentConfigurationError(
-                    "FHIR MCP 服务缺少患者流程需要的工具：" + ", ".join(missing)
-                )
-            tools = [
-                make_patient_tool(available[name], patient_id, task_key)
-                for name in required
-            ]
-            child_pending = {tool.name: {"allowed_decisions": ["approve", "reject"]} for tool in tools if tool.name in WRITE_TOOLS}
-            pending.update({name: True for name in child_pending})
-            children.append({
-                "name": specialist.name,
-                "description": specialist.description,
-                "system_prompt": specialist.system_prompt,
-                "tools": tools,
-                "interrupt_on": child_pending,
-                "mode": "isolated",
-            })
-        return children, pending
+    @cached_property
+    def memory_store(self) -> PatientMemoryVectorStore:
+        storage = Path(os.getenv("AGENT_STORAGE_PATH", "./storage"))
+        model_dir = Path(os.getenv(
+            "AGENT_MODEL_DIR",
+            str(Path(__file__).resolve().parents[3] / ".." / "knowledge-platform" / "models"),
+        ))
+        return PatientMemoryVectorStore(storage / "patient-memory-vectors.sqlite3", model_dir)
 
     @staticmethod
     def _has_pending_interrupt(result: Any) -> bool:
         interrupts = getattr(result, "interrupts", ())
         return bool(interrupts) or bool(result.get("__interrupt__"))
+
+    @staticmethod
+    def _agui_interrupt_decisions(interrupts: list[Any], responses: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+        response_by_id = {item.get("interrupt_id"): item for item in responses}
+        expected = {item.id for item in interrupts}
+        if set(response_by_id) != expected:
+            raise ValueError("AG-UI resume 必须一次回应当前会话的全部待处理确认。")
+        decisions: dict[str, dict[str, str]] = {}
+        for interrupt_id, item in response_by_id.items():
+            if item.get("status") == "cancelled":
+                decisions[interrupt_id] = {"type": "reject", "message": "患者取消了这次写入。"}
+                continue
+            payload = item.get("payload")
+            if not isinstance(payload, dict) or not isinstance(payload.get("approved"), bool):
+                raise ValueError("AG-UI 确认内容需要提供布尔值 approved。")
+            decision = {"type": "approve" if payload["approved"] else "reject"}
+            if not payload["approved"]:
+                decision["message"] = "患者没有同意这次写入。"
+            decisions[interrupt_id] = decision
+        return decisions
+
+    @staticmethod
+    def _agui_interrupts(result: dict[str, Any]) -> list[dict[str, Any]]:
+        pending = result.get("__interrupt__", [])
+        return [
+            {
+                "id": item.id,
+                "reason": "confirmation",
+                "message": PatientMainAgent._approval_summary(result),
+                "responseSchema": {
+                    "type": "object",
+                    "properties": {"approved": {"type": "boolean"}},
+                    "required": ["approved"],
+                },
+            }
+            for item in pending
+        ]
 
     @staticmethod
     def _approval_summary(result: Any) -> str:

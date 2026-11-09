@@ -9,8 +9,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from backend.agents.patient.agent import PatientMainAgent
-from backend.agents.patient.subagents import PATIENT_SPECIALISTS
-from backend.integrations.patient_mcp import make_patient_tool, patient_id_from_context
+from backend.agents.patient.registry import PatientAgentRegistry
+from backend.integrations.mcp.patient_fhir import make_patient_tool, patient_id_from_context
 from backend.runtime.async_runner import run_async
 
 
@@ -63,10 +63,11 @@ class PatientWorkflowTests(unittest.TestCase):
         second = PatientMainAgent._thread_id({"conversationId": "same"}, "demo-patient-0002", "turn-1")
         self.assertNotEqual(first, second)
 
-    def test_eight_specialists_have_small_explicit_tool_sets(self) -> None:
-        self.assertEqual(len(PATIENT_SPECIALISTS), 8)
-        self.assertTrue(all(item.read_tools for item in PATIENT_SPECIALISTS))
-        self.assertEqual(PATIENT_SPECIALISTS[0].write_tools, ())
+    def test_eight_specialists_are_found_through_the_registry(self) -> None:
+        specialists = PatientAgentRegistry().discover()
+        self.assertEqual(len(specialists), 8)
+        self.assertTrue(all(item.definition.read_tools for item in specialists.values()))
+        self.assertEqual(specialists["symptom_safety_triage"].definition.write_tools, ())
 
     def test_write_tool_binds_patient_and_confirmation_fields(self) -> None:
         raw = FakeWriteTool()
@@ -87,21 +88,10 @@ class PatientWorkflowTests(unittest.TestCase):
         second = run_async(loop_id())
         self.assertEqual(first, second)
 
-    def test_memory_requires_consent_and_can_be_cleared(self) -> None:
-        store = FakeStore()
-        run_async(PatientMainAgent._save_explicit_preference(
-            store, "demo-patient-0001", {"memoryConsent": True, "memoryPreference": {
-                "language": "简体中文", "diagnosis": "不应保存",
-            }}
-        ))
-        saved = store.items[(
-            ("patient-demo", "demo-patient-0001", "behavioral"), "preferences"
-        )]
-        self.assertEqual(saved, {"language": "简体中文"})
-        run_async(PatientMainAgent._save_explicit_preference(
-            store, "demo-patient-0001", {"memoryConsent": False}
-        ))
-        self.assertEqual(store.items, {})
+    def test_memory_reads_by_default_and_can_be_disabled(self) -> None:
+        self.assertTrue(PatientMainAgent._memory_enabled({}))
+        self.assertTrue(PatientMainAgent._memory_enabled({"memoryConsent": True}))
+        self.assertFalse(PatientMainAgent._memory_enabled({"memoryConsent": False}))
 
 
 if __name__ == "__main__":

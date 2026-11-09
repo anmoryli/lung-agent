@@ -13,9 +13,12 @@
       AGENT_BIND_HOST: 0.0.0.0
       AGENT_SERVICE_PORT: 8010
       AGENT_STORAGE_PATH: /app/storage
+      AGENT_MODEL_DIR: /app/models
+      AGENT_CORS_ORIGINS: ${AGENT_CORS_ORIGINS:-*}
       FHIR_MCP_URL: ${FHIR_MCP_URL:-http://host.docker.internal:8001/mcp}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
       FHIR_MCP_HOST_HEADER: ${FHIR_MCP_HOST_HEADER:-localhost:8001}
     volumes:
       - ./storage:/app/storage
+      - ../knowledge-platform/models:/app/models
     restart: unless-stopped
