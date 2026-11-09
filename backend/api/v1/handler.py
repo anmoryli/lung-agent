@@ -10,6 +10,7 @@ import re
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from ag_ui.core import (
@@ -46,7 +47,22 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     server_version = "AgentService/0.1"
 
     def do_GET(self) -> None:
-        if urlparse(self.path).path == "/health":
+        request_path = urlparse(self.path).path
+        static_files = {
+            "/": ("index.html", "text/html; charset=utf-8"),
+            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        }
+        if request_path in static_files:
+            filename, content_type = static_files[request_path]
+            page = Path(__file__).resolve().parents[3] / "frontend" / filename
+            body = page.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if request_path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "找不到这个地址。"})

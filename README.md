@@ -31,6 +31,7 @@ LANGSMITH_PROJECT=lung-agent
 追踪会记录模型调用内容。当前项目使用合成数据，接入真实患者数据前要先确定数据处理和隐私规则。
 
 服务启动后，健康检查地址是 <http://localhost:8010/health>。
+患者 SSE 对话页面也由同一个服务托管，浏览器打开 <http://localhost:8010/> 即可使用。
 
 ## Docker 启动
 
