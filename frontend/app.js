@@ -1,5 +1,7 @@
-const STORAGE_KEY = "deepagents.patient-chat.v1";
+const STORAGE_KEY = "deepagents.patient-chat.current.v2";
+    const LEGACY_STORAGE_KEY = "deepagents.patient-chat.v1";
     const conversation = document.querySelector("#conversation");
+    const sessionList = document.querySelector("#sessionList");
     const form = document.querySelector("#chatForm");
     const input = document.querySelector("#messageInput");
     const sendButton = document.querySelector("#sendButton");
@@ -11,6 +13,7 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     const agentTodos = document.querySelector("#agentTodos");
     let state = readState();
     let activeController = null;
+    let sessionCatalog = [];
 
     function newId(prefix) {
       return `${prefix}-${crypto.randomUUID()}`;
@@ -19,7 +22,9 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     function readState() {
       try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-        if (saved && Array.isArray(saved.messages) && typeof saved.threadId === "string") return saved;
+        if (saved && typeof saved.threadId === "string") return { ...saved, messages: [], pendingInterrupts: [] };
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
+        if (legacy && typeof legacy.threadId === "string") return { ...legacy, messages: [], pendingInterrupts: [] };
       } catch (error) {
         console.warn("读取本地聊天记录失败", error);
       }
@@ -28,7 +33,7 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
 
     function saveState() {
       state.patientId = patientId.value.trim() || "demo-patient-0001";
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ threadId: state.threadId, patientId: state.patientId }));
     }
 
     function renderAgentState(snapshot) {
@@ -62,8 +67,85 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     function renderHistory() {
       welcome.hidden = state.messages.length > 0;
       conversation.querySelectorAll(".message").forEach(node => node.remove());
-      for (const message of state.messages) renderMessage(message);
+      state.messages.forEach((message, index) => {
+        const rendered = renderMessage(message);
+        if (index === state.messages.length - 1 && message.role === "assistant" && state.pendingInterrupts?.length) {
+          showInterrupt(rendered.bubble, state.pendingInterrupts);
+        }
+      });
       scrollToBottom();
+    }
+
+    function renderSessionCatalog() {
+      sessionList.replaceChildren();
+      if (!sessionCatalog.length) {
+        const empty = document.createElement("p");
+        empty.className = "session-item-meta";
+        empty.textContent = "还没有保存的会话";
+        sessionList.append(empty);
+        return;
+      }
+      for (const session of sessionCatalog) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "session-item";
+        button.setAttribute("aria-current", String(session.thread_id === state.threadId));
+        const title = document.createElement("span");
+        title.className = "session-item-title";
+        title.textContent = session.title || "新会话";
+        const meta = document.createElement("span");
+        meta.className = "session-item-meta";
+        meta.textContent = `${session.status} · ${new Date(session.updated_at).toLocaleString()}`;
+        button.append(title, meta);
+        button.addEventListener("click", () => loadSession(session.thread_id));
+        sessionList.append(button);
+      }
+    }
+
+    async function refreshSessionCatalog() {
+      const id = encodeURIComponent(patientId.value.trim() || "demo-patient-0001");
+      const response = await fetch(`/api/v1/agents/patient/sessions?patientId=${id}`);
+      if (!response.ok) throw new Error("无法读取服务端会话列表");
+      sessionCatalog = (await response.json()).sessions || [];
+      renderSessionCatalog();
+    }
+
+    async function loadSession(threadId) {
+      if (activeController) activeController.abort();
+      const id = encodeURIComponent(patientId.value.trim() || "demo-patient-0001");
+      const response = await fetch(`/api/v1/agents/patient/sessions/${encodeURIComponent(threadId)}?patientId=${id}`);
+      if (!response.ok) throw new Error("无法加载这个会话");
+      const saved = (await response.json()).session;
+      state = {
+        threadId: saved.thread_id,
+        patientId: saved.patient_id,
+        messages: saved.messages || [],
+        agentState: saved.agent_state || {},
+        pendingInterrupts: saved.pending_interrupts || [],
+      };
+      patientId.value = state.patientId;
+      saveState();
+      if (state.agentState && Object.keys(state.agentState).length) renderAgentState(state.agentState);
+      else clearAgentState();
+      renderHistory();
+      renderSessionCatalog();
+    }
+
+    async function initializeSessions() {
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "null");
+      await refreshSessionCatalog();
+      if (legacy?.threadId && Array.isArray(legacy.messages) && legacy.messages.length &&
+          !sessionCatalog.some(item => item.thread_id === legacy.threadId)) {
+        const imported = await fetch("/api/v1/agents/patient/sessions/import", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ threadId: legacy.threadId, patientId: legacy.patientId || "demo-patient-0001", messages: legacy.messages }),
+        });
+        if (!imported.ok) throw new Error("旧会话迁入服务端失败");
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        await refreshSessionCatalog();
+      }
+      const target = sessionCatalog.find(item => item.thread_id === state.threadId) || sessionCatalog[0];
+      if (target) await loadSession(target.thread_id);
     }
 
     function renderMessage(message, pending = false, isError = false) {
@@ -269,7 +351,10 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
         const body = {
           threadId: runState.threadId,
           runId: newId("run"),
-          messages: runState.messages.map(({ id, role, content }) => ({ id, role, content })),
+          messages: runState.messages
+            .filter(message => (message.role === "user" || message.role === "assistant") &&
+              (message.role !== "assistant" || message.content.trim()))
+            .map(({ id, role, content }) => ({ id, role, content })),
           tools: [],
           context: [{ description: "patient_id", value: patientId.value.trim() || "demo-patient-0001" }],
           forwardedProps: {},
@@ -330,10 +415,12 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
           rendered.row.classList.add("message-error");
         }
       } finally {
+        runState.pendingInterrupts = pendingInterrupts;
         renderMarkdown(rendered.bubble, assistant.content);
         if (pendingInterrupts.length) showInterrupt(rendered.bubble, pendingInterrupts);
         rendered.bubble.classList.remove("pending");
         if (state === runState) saveState();
+        refreshSessionCatalog().catch(error => console.warn("刷新会话列表失败", error));
         if (activeController === controller) activeController = null;
         setBusy(false);
       }
@@ -364,6 +451,7 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
       clearAgentState();
       saveState();
       renderHistory();
+      renderSessionCatalog();
       input.focus();
     });
 
@@ -376,6 +464,7 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
       });
     });
     renderHistory();
+    initializeSessions().catch(error => console.error("加载服务端会话失败", error));
 
     fetch("/health").then(response => {
       if (!response.ok) throw new Error("offline");

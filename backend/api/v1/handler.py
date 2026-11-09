@@ -11,6 +11,7 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ag_ui.core import (
@@ -30,12 +31,45 @@ from pydantic import Field
 
 from backend.agents.base import AgentConfigurationError
 from backend.gateway.orchestration.gateway import Gateway, UnknownRoleError
+from backend.integrations.mcp.patient_fhir import patient_id_from_context
+from backend.shared.sessions.session_store import PatientSessionStore
 from backend.shared.tasking.idempotency_store import IdempotencyConflict
 from backend.runtime.active_runs import active_runs
 from backend.runtime.async_runner import submit_async
 
 
 gateway = Gateway()
+session_store = PatientSessionStore()
+
+
+def _normalize_messages(messages: Any) -> list[dict[str, Any]]:
+    """目录只保存对话文本，不把工具内部消息伪装成用户对话。"""
+    if not isinstance(messages, list):
+        raise ValueError("messages 必须是数组。")
+    normalized = []
+    for item in messages:
+        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
+            continue
+        content = item.get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(part.get("text", "") for part in content if isinstance(part, dict))
+        if not isinstance(content, str):
+            continue
+        content = content[:20000]
+        if content.strip():
+            normalized.append({"id": str(item.get("id") or uuid.uuid4().hex), "role": item["role"], "content": content})
+    return normalized[-200:]
+
+
+def _messages_from_run_input(run_input: RunAgentInput) -> list[dict[str, Any]]:
+    return _normalize_messages([item.model_dump() for item in run_input.messages])
+
+
+def _append_assistant(messages: list[dict[str, Any]], answer: str) -> list[dict[str, Any]]:
+    result = list(messages)
+    if answer.strip():
+        result.append({"id": f"assistant-{uuid.uuid4().hex}", "role": "assistant", "content": answer})
+    return result[-200:]
 
 
 class InterruptAwareRunFinishedEvent(RunFinishedEvent):
@@ -48,7 +82,15 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     server_version = "AgentService/0.1"
 
     def do_GET(self) -> None:
-        request_path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        request_path = parsed.path
+        if request_path == "/api/v1/agents/patient/sessions":
+            self._send_patient_sessions(parse_qs(parsed.query).get("patientId", [""])[0])
+            return
+        session_match = re.fullmatch(r"/api/v1/agents/patient/sessions/([A-Za-z0-9_.:-]{1,128})", request_path)
+        if session_match:
+            self._send_patient_session(session_match.group(1), parse_qs(parsed.query).get("patientId", [""])[0])
+            return
         static_files = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -81,20 +123,24 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.ACCEPTED, {"status": "cancelled", "threadId": thread_id})
 
     def do_OPTIONS(self) -> None:
-        if urlparse(self.path).path != "/api/v1/agents/patient/ag-ui" and not urlparse(self.path).path.startswith(
-            "/api/v1/agents/patient/runs/"
+        path = urlparse(self.path).path
+        if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import"} and not path.startswith(
+            ("/api/v1/agents/patient/runs/", "/api/v1/agents/patient/sessions")
         ):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "找不到这个地址。"})
             return
         self.send_response(HTTPStatus.NO_CONTENT)
         self._send_cors_headers()
-        self.send_header("Access-Control-Allow-Methods", "POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept")
         self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
     def do_POST(self) -> None:
         request_path = urlparse(self.path).path
+        if request_path == "/api/v1/agents/patient/sessions/import":
+            self._import_session()
+            return
         if request_path == "/api/v1/agents/patient/ag-ui":
             self._handle_agui()
             return
@@ -136,6 +182,40 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 {"error": "主 Agent 调用失败，请检查模型配置和服务日志。"},
             )
 
+    def _send_patient_sessions(self, requested_patient_id: str) -> None:
+        try:
+            patient_id = patient_id_from_context({"patient_id": requested_patient_id})
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        self._send_json(HTTPStatus.OK, {"sessions": session_store.list_for_patient(patient_id)})
+
+    def _send_patient_session(self, thread_id: str, requested_patient_id: str) -> None:
+        try:
+            patient_id = patient_id_from_context({"patient_id": requested_patient_id})
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        session = session_store.get(thread_id, patient_id)
+        if session is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "没有找到这个会话。"})
+            return
+        self._send_json(HTTPStatus.OK, {"session": session})
+
+    def _import_session(self) -> None:
+        """把旧版页面里尚未进入服务端的聊天记录迁入会话目录。"""
+        try:
+            data = self._read_request()
+            thread_id = data.get("threadId")
+            if not isinstance(thread_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", thread_id):
+                raise ValueError("threadId 格式不正确。")
+            patient_id = patient_id_from_context({"patient_id": data.get("patientId")})
+            messages = _normalize_messages(data.get("messages", []))
+            session_store.save(thread_id, patient_id, messages, status="ready")
+            self._send_json(HTTPStatus.OK, {"threadId": thread_id, "status": "imported"})
+        except (ValueError, TypeError, json.JSONDecodeError) as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
     def _handle_agui(self) -> None:
         """按 AG-UI RunAgentInput 接收一轮对话，并用官方编码器输出 SSE。"""
         try:
@@ -149,10 +229,19 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", run_input.run_id):
                 raise ValueError("runId 只能包含字母、数字、下划线、点、冒号和短横线，长度不超过 128。")
             context = self._agui_context(run_input)
+            patient_id = patient_id_from_context(context)
         except (ValueError, TypeError, json.JSONDecodeError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
 
+        request_messages = _messages_from_run_input(run_input)
+        previous_session = session_store.get(run_input.thread_id, patient_id)
+        session_store.save(
+            run_input.thread_id, patient_id, request_messages, status="running",
+            agent_state=(previous_session or {}).get("agent_state"),
+            pending_interrupts=(previous_session or {}).get("pending_interrupts"),
+        )
+        progress: dict[str, Any] = {"state": {}, "answer": ""}
         try:
             agent = gateway.get_agent("patient")
             context["conversationId"] = run_input.thread_id
@@ -171,6 +260,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             events: queue.Queue = queue.Queue()
             push_state = os.getenv("AGENT_AGUI_PUSH_STATE", "true").strip().lower() in {"1", "true", "yes", "on"}
             if not active_runs.reserve(run_input.run_id, run_input.thread_id, events):
+                session_store.save(run_input.thread_id, patient_id, request_messages, status="ready")
                 self._send_json(
                     HTTPStatus.CONFLICT,
                     {"error": "同一个 threadId 只能同时运行一个 Agent 请求，或 runId 已被占用。"},
@@ -179,6 +269,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
             async def run_patient():
                 def send_state(snapshot: dict) -> None:
+                    progress["state"] = snapshot
                     if push_state:
                         events.put(("state", snapshot))
 
@@ -201,6 +292,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             future.add_done_callback(lambda completed: self._queue_completion(events, completed))
         except Exception:
             active_runs.finish(run_input.run_id)
+            session_store.save(run_input.thread_id, patient_id, request_messages, status="error")
             logging.exception("AG-UI 患者运行初始化失败")
             self._send_json(HTTPStatus.BAD_GATEWAY, {"error": "患者 Agent 无法开始运行，请检查服务配置。"})
             return
@@ -236,6 +328,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     continue
                 if kind == "delta" and value:
                     streamed = True
+                    progress["answer"] = str(progress["answer"]) + value
                     self._write_event(encoder, TextMessageContentEvent(
                         type=EventType.TEXT_MESSAGE_CONTENT,
                         message_id=message_id,
@@ -244,6 +337,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 elif kind == "interrupt":
                     interrupted = value
                 elif kind == "state":
+                    progress["state"] = value
                     self._write_event(encoder, StateSnapshotEvent(
                         type=EventType.STATE_SNAPSHOT,
                         snapshot=value,
@@ -266,9 +360,21 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     )
                     if interrupted:
                         finished.outcome = {"type": "interrupt", "interrupts": interrupted}
+                    completed_messages = _append_assistant(request_messages, str(value or progress["answer"]))
+                    session_store.save(
+                        run_input.thread_id, patient_id, completed_messages,
+                        status="waiting_confirmation" if interrupted else "ready",
+                        agent_state=progress["state"], pending_interrupts=interrupted,
+                    )
                     self._write_event(encoder, finished)
                     break
                 elif kind == "error":
+                    partial = str(progress["answer"])
+                    session_store.save(
+                        run_input.thread_id, patient_id,
+                        _append_assistant(request_messages, partial) if partial else request_messages,
+                        status="error", agent_state=progress["state"],
+                    )
                     if push_state:
                         self._write_event(encoder, StateSnapshotEvent(
                             type=EventType.STATE_SNAPSHOT,
@@ -284,6 +390,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     break
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             active_runs.cancel(run_input.run_id, run_input.thread_id)
+            partial = str(progress["answer"])
+            session_store.save(
+                run_input.thread_id, patient_id,
+                _append_assistant(request_messages, partial) if partial else request_messages,
+                status="interrupted", agent_state=progress["state"], pending_interrupts=interrupted,
+            )
         finally:
             active_runs.finish(run_input.run_id)
 

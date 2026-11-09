@@ -93,6 +93,11 @@
     .stop-button { color: #874b2e; background: #f8ece3; }
     .disclaimer { max-width: 760px; margin: 9px auto 0; text-align: center; color: #929b94; font-size: 10px; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .session-list { display: grid; gap: 6px; max-height: 34vh; margin-top: 10px; overflow: auto; }
+    .session-item { width: 100%; padding: 10px 11px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; }
+    .session-item:hover, .session-item[aria-current="true"] { border-color: var(--line); background: var(--panel); }
+    .session-item-title { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .session-item-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
     @keyframes blink { to { opacity: 0; } }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 760px) {
@@ -114,6 +119,10 @@
 <body>
   <div class="app">
     <aside>
+      <section>
+        <div class="side-label">会话列表</div>
+        <div id="sessionList" class="session-list" aria-live="polite"></div>
+      </section>
       <div class="brand"><span class="brand-mark">＋</span><span>DeepAgents Care</span></div>
       <section>
         <div class="side-label">当前会话</div>
