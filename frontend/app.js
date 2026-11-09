@@ -186,6 +186,17 @@
         entries = Object.entries(profileData.fhir || {}).map(([name, value]) => profileCard(name, value));
       } else if (tab === "memory") {
         const summary = profileData.memoryProfile || {};
+        const extraction = profileData.memoryExtraction || {};
+        const extractionCounts = extraction.counts || {};
+        const latestExtraction = extraction.latest;
+        const extractionStatuses = { pending: "排队中", processing: "抽取中", done: "已完成", failed: "失败" };
+        entries.push(profileCard(
+          "回合结束后的记忆抽取",
+          latestExtraction
+            ? `${extractionStatuses[latestExtraction.status] || latestExtraction.status} · 写入 ${latestExtraction.memories_written || 0} 条${latestExtraction.last_error ? `\n错误：${latestExtraction.last_error}` : ""}`
+            : "还没有抽取任务",
+          `排队 ${extractionCounts.pending || 0} · 处理中 ${extractionCounts.processing || 0} · 失败 ${extractionCounts.failed || 0} · 最近任务 ${latestExtraction?.created_at || "无"}`,
+        ));
         entries.push(profileCard(
           `每轮注入摘要 · revision ${summary.revision || 0}`,
           summary.summary || "暂无长期记忆摘要",

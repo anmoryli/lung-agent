@@ -41,7 +41,7 @@ def create_patient_tools(
         evidence: str = "",
         conflicts_with_id: str = "",
     ) -> str:
-        """保存明确要求记住的非临床事实；可设重要度、有效期、替代关系或未解决冲突。"""
+        """保存用户明确要求记住的事实；医疗信息要保留自述原句，可设重要度、有效期和版本关系。"""
         remember(content, category, importance, expires_in_days, supersedes_id, evidence, conflicts_with_id)
         return "已写入独立长期记忆，并更新每轮注入的短摘要。"
 

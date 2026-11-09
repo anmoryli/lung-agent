@@ -18,6 +18,12 @@ from typing import Any
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 MODEL_DIMENSIONS = 512
 QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
+MEMORY_HALF_LIFE_DAYS = {
+    "allergy": 3650, "medication": 3650, "constraint": 3650,
+    "event": 1095, "fact": 1095,
+    "service_need": 365, "communication": 365, "preference": 365, "other": 365,
+    "episode": 180,
+}
 
 
 class PatientMemoryVectorStore:
@@ -78,7 +84,8 @@ class PatientMemoryVectorStore:
             ).fetchall()
             memory_rows = connection.execute(
                 "SELECT memory_id, category, content, importance, confidence, status, source, evidence, "
-                "created_at, updated_at, expires_at, supersedes_id, conflicts_with_id, weight "
+                "created_at, updated_at, valid_from, valid_to, expires_at, supersedes_id, conflicts_with_id, "
+                "protected, weight "
                 "FROM patient_long_term_memories WHERE patient_id = ? ORDER BY updated_at DESC",
                 (patient_id,),
             ).fetchall()
@@ -97,8 +104,9 @@ class PatientMemoryVectorStore:
                 "entry_id": row[0], "kind": "long_term", "text": row[2],
                 "category": row[1], "importance": row[3], "confidence": row[4],
                 "status": row[5], "source": row[6], "evidence": row[7],
-                "created_at": row[8], "updated_at": row[9], "expires_at": row[10],
-                "supersedes_id": row[11], "conflicts_with_id": row[12], "weight": row[13],
+                "created_at": row[8], "updated_at": row[9], "valid_from": row[10],
+                "valid_to": row[11], "expires_at": row[12], "supersedes_id": row[13],
+                "conflicts_with_id": row[14], "protected": bool(row[15]), "weight": row[16],
             }
             for row in memory_rows
         ]
@@ -122,31 +130,142 @@ class PatientMemoryVectorStore:
             for row in rows
         ]
 
-    def archive(self, patient_id: str, conversation_id: str, task_key: str, side: str, text: str) -> None:
+    def archive(self, patient_id: str, conversation_id: str, task_key: str, side: str, text: str) -> str | None:
         clean = text.strip()[:6000]
         if not clean:
-            return
+            return None
         entry_id = f"{patient_id}:{conversation_id}:{task_key}:{side}"
         self._upsert(patient_id, entry_id, clean, conversation_id, "archive")
+        return entry_id
+
+    def enqueue_extraction(
+        self, patient_id: str, conversation_id: str, task_key: str, source_entry_id: str
+    ) -> None:
+        """把本轮用户原话放入持久队列，后台 worker 再抽取稳定事实。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute(
+                """INSERT OR IGNORE INTO patient_memory_extraction_jobs
+                   (patient_id, conversation_id, task_key, source_entry_id, status, attempts,
+                    created_at, run_after)
+                   VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)""",
+                (patient_id, conversation_id, task_key, source_entry_id, now, now),
+            )
+
+    def recover_extraction_jobs(self) -> None:
+        """服务重启时把上次处理中断的任务放回队列。"""
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_extraction_jobs SET status='pending', started_at=NULL "
+                "WHERE status='processing'"
+            )
+
+    def claim_extraction_job(self) -> dict[str, Any] | None:
+        """领取一条到期任务，数据库写锁保证同一时刻只有一个 worker 领取。"""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT id, patient_id, conversation_id, task_key, source_entry_id, attempts "
+                "FROM patient_memory_extraction_jobs WHERE status='pending' AND run_after<=? "
+                "ORDER BY id LIMIT 1", (now,),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                "UPDATE patient_memory_extraction_jobs SET status='processing', started_at=? WHERE id=?",
+                (now, row[0]),
+            )
+        return {
+            "id": row[0], "patient_id": row[1], "conversation_id": row[2],
+            "task_key": row[3], "source_entry_id": row[4], "attempts": row[5],
+        }
+
+    def get_archive_text(self, entry_id: str) -> str | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT text FROM patient_memory_vectors WHERE entry_id=? AND kind='archive'", (entry_id,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def active_long_term_memories(self, patient_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT memory_id, category, content, importance, confidence, protected "
+                "FROM patient_long_term_memories WHERE patient_id=? AND status='active' "
+                "ORDER BY protected DESC, importance DESC, updated_at DESC LIMIT ?",
+                (patient_id, limit),
+            ).fetchall()
+        return [
+            {"memory_id": row[0], "category": row[1], "content": row[2],
+             "importance": row[3], "confidence": row[4], "protected": bool(row[5])}
+            for row in rows
+        ]
+
+    def finish_extraction_job(self, job_id: int, memories_written: int) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_extraction_jobs SET status='done', finished_at=?, "
+                "memories_written=?, last_error=NULL WHERE id=?",
+                (now, memories_written, job_id),
+            )
+
+    def retry_extraction_job(self, job: dict[str, Any], error: Exception) -> None:
+        attempts = int(job["attempts"]) + 1
+        status = "failed" if attempts >= 5 else "pending"
+        delay = min(3600, 15 * (2 ** (attempts - 1)))
+        run_after = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        with self._connection() as connection:
+            connection.execute(
+                "UPDATE patient_memory_extraction_jobs SET status=?, attempts=?, run_after=?, "
+                "started_at=NULL, last_error=? WHERE id=?",
+                (status, attempts, run_after.isoformat(), str(error)[:500], job["id"]),
+            )
+
+    def extraction_status(self, patient_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            counts = connection.execute(
+                "SELECT status, COUNT(*) FROM patient_memory_extraction_jobs "
+                "WHERE patient_id=? GROUP BY status", (patient_id,),
+            ).fetchall()
+            latest = connection.execute(
+                "SELECT status, created_at, finished_at, memories_written, last_error "
+                "FROM patient_memory_extraction_jobs WHERE patient_id=? ORDER BY id DESC LIMIT 1",
+                (patient_id,),
+            ).fetchone()
+        latest_job = (
+            {
+                "status": latest[0], "created_at": latest[1], "finished_at": latest[2],
+                "memories_written": latest[3], "last_error": latest[4],
+            }
+            if latest else None
+        )
+        return {"counts": {row[0]: row[1] for row in counts}, "latest": latest_job}
 
     def remember(
         self, patient_id: str, text: str, source: str, category: str = "preference",
         importance: int = 3, expires_in_days: int | None = None,
         supersedes_id: str = "", evidence: str = "", conflicts_with_id: str = "",
+        confidence: float = 0.9, protected: bool | None = None,
     ) -> None:
-        """把明确要记住的非临床信息单独入档，并更新每轮注入的短摘要。"""
+        """把证据明确的长期事实单独入档，并更新每轮注入的短摘要。"""
         clean = text.strip()[:1000]
         if not clean:
             return
-        if category not in {"preference", "communication", "service_need", "other"}:
-            raise ValueError("长期记忆类型只支持 preference、communication、service_need、other。")
+        if category not in MEMORY_HALF_LIFE_DAYS:
+            raise ValueError("长期记忆类型不在已支持的类别中。")
         if not isinstance(importance, int) or not 1 <= importance <= 5:
             raise ValueError("长期记忆重要度必须是 1 到 5。")
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise ValueError("长期记忆置信度必须在 0 到 1 之间。")
         if expires_in_days is not None and not 1 <= expires_in_days <= 3650:
             raise ValueError("过期天数必须在 1 到 3650 天之间。")
         if supersedes_id and conflicts_with_id:
             raise ValueError("一条新记忆只能替代旧记忆，或标记未解决冲突，不能同时执行两种关系。")
         clean_evidence = (evidence.strip() or clean)[:1000]
+        if protected is None:
+            protected = category in {"allergy", "medication", "constraint"}
         digest = hashlib.sha256(f"{category}:{clean.casefold()}".encode("utf-8")).hexdigest()[:24]
         memory_id = f"memory:{patient_id}:{digest}"
         now = datetime.now(timezone.utc)
@@ -161,7 +280,7 @@ class PatientMemoryVectorStore:
                 if not prior:
                     raise ValueError("要替代的记忆不属于当前患者或已不存在。")
                 connection.execute(
-                    "UPDATE patient_long_term_memories SET status='superseded', expires_at=?, updated_at=? "
+                    "UPDATE patient_long_term_memories SET status='superseded', valid_to=?, updated_at=? "
                     "WHERE memory_id=? AND patient_id=?",
                     (now.isoformat(), now.isoformat(), supersedes_id, patient_id),
                 )
@@ -180,20 +299,23 @@ class PatientMemoryVectorStore:
                 status = "conflicted"
             connection.execute(
                 """INSERT INTO patient_long_term_memories
-                   (memory_id, patient_id, category, content, importance, confidence, status,
-                    source, evidence, created_at, updated_at, expires_at, supersedes_id,
-                    conflicts_with_id, last_accessed_at, access_count, weight)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    (memory_id, patient_id, category, content, importance, confidence, status,
+                    source, evidence, created_at, updated_at, valid_from, valid_to, expires_at, supersedes_id,
+                    conflicts_with_id, protected, last_accessed_at, access_count, weight)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(memory_id) DO UPDATE SET
                      content=excluded.content, importance=excluded.importance,
+                     confidence=excluded.confidence,
                      status=excluded.status, source=excluded.source, evidence=excluded.evidence,
-                     updated_at=excluded.updated_at, expires_at=excluded.expires_at,
+                     updated_at=excluded.updated_at, valid_from=excluded.valid_from,
+                     valid_to=excluded.valid_to,
+                     expires_at=excluded.expires_at, protected=excluded.protected,
                      supersedes_id=excluded.supersedes_id,
                      conflicts_with_id=excluded.conflicts_with_id,
                      weight=excluded.weight""",
-                (memory_id, patient_id, category, clean, importance, 0.9, status, source, clean_evidence,
-                 now.isoformat(), now.isoformat(), expires_at, supersedes_id or None, conflicts_with_id or None,
-                 now.isoformat(), importance * 18),
+                (memory_id, patient_id, category, clean, importance, float(confidence), status, source, clean_evidence,
+                 now.isoformat(), now.isoformat(), now.isoformat(), None, expires_at, supersedes_id or None,
+                 conflicts_with_id or None, int(protected), now.isoformat(), 0, importance * 18),
             )
         self.build_long_term_profile(patient_id)
 
@@ -203,13 +325,13 @@ class PatientMemoryVectorStore:
         now_iso = now.isoformat()
         with self._connection() as connection:
             connection.execute(
-                "UPDATE patient_long_term_memories SET status='expired', updated_at=? "
+                "UPDATE patient_long_term_memories SET status='expired', valid_to=expires_at, updated_at=? "
                 "WHERE patient_id=? AND status='active' AND expires_at IS NOT NULL AND expires_at<=?",
                 (now_iso, patient_id, now_iso),
             )
             rows = connection.execute(
                 "SELECT memory_id, category, content, importance, confidence, updated_at, "
-                "access_count, expires_at, status "
+                "access_count, expires_at, status, protected, valid_from "
                 "FROM patient_long_term_memories WHERE patient_id=? AND status='active'",
                 (patient_id,),
             ).fetchall()
@@ -218,28 +340,29 @@ class PatientMemoryVectorStore:
                 # 注入不等于更新事实，衰减从记忆最后一次被确认或修订时开始算。
                 updated = datetime.fromisoformat(row[5])
                 age_days = max(0.0, (now - updated).total_seconds() / 86400)
-                half_life_days = 30 * max(1, row[3])
+                half_life_days = MEMORY_HALF_LIFE_DAYS.get(row[1], 365)
                 decay = exp(-log(2) * age_days / half_life_days)
                 weight = round(min(100.0, row[3] * 20 * row[4] * decay), 1)
                 connection.execute(
                     "UPDATE patient_long_term_memories SET weight=? WHERE memory_id=?",
                     (weight, row[0]),
                 )
-                if weight < 12:
+                if weight < 12 and not row[9]:
                     connection.execute(
                         "UPDATE patient_long_term_memories SET status='stale' WHERE memory_id=?",
                         (row[0],),
                     )
                 ranked.append((weight, row))
-            ranked.sort(key=lambda item: item[0], reverse=True)
+            ranked.sort(key=lambda item: (bool(item[1][9]), item[0]), reverse=True)
             parts = []
             used = 0
             included_ids = []
             for weight, row in ranked:
-                if weight < 12:
+                if weight < 12 and not row[9]:
                     continue
-                part = f"- [{row[1]} · 权重 {weight:.1f}] {row[2]}"
-                if used + len(part) > max_chars:
+                validity = f"有效自 {row[10][:10]}" if row[10] else ""
+                part = f"- [{row[1]} · 权重 {weight:.1f} · {validity}] {row[2]}"
+                if used + len(part) > max_chars and not row[9]:
                     continue
                 parts.append(part)
                 included_ids.append(row[0])
@@ -269,7 +392,7 @@ class PatientMemoryVectorStore:
                 )
             else:
                 revision = current[1]
-        active_count = sum(1 for weight, _ in ranked if weight >= 12)
+        active_count = sum(1 for weight, row in ranked if weight >= 12 or row[9])
         return {"summary": summary, "revision": revision, "active_count": active_count, "included_count": len(included_ids)}
 
     def _upsert(self, patient_id: str, entry_id: str, text: str, source: str, kind: str) -> None:
@@ -296,7 +419,10 @@ class PatientMemoryVectorStore:
                 "DELETE FROM patient_memory_vectors WHERE rowid = ?",
                 row_ids,
             )
-            for table in ("patient_long_term_memories", "patient_long_term_profiles", "patient_memory_retrievals"):
+            for table in (
+                "patient_long_term_memories", "patient_long_term_profiles",
+                "patient_memory_retrievals", "patient_memory_extraction_jobs",
+            ):
                 connection.execute(f"DELETE FROM {table} WHERE patient_id=?", (patient_id,))
 
     def _embed(self, text: str) -> list[float]:
@@ -346,7 +472,8 @@ class PatientMemoryVectorStore:
                         memory_id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, category TEXT NOT NULL,
                         content TEXT NOT NULL, importance INTEGER NOT NULL, confidence REAL NOT NULL,
                         status TEXT NOT NULL, source TEXT NOT NULL, evidence TEXT NOT NULL,
-                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT,
+                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, valid_from TEXT,
+                        valid_to TEXT, expires_at TEXT, protected INTEGER NOT NULL DEFAULT 0,
                         supersedes_id TEXT, conflicts_with_id TEXT, last_accessed_at TEXT,
                         access_count INTEGER NOT NULL DEFAULT 0,
                         weight REAL NOT NULL DEFAULT 0
@@ -361,6 +488,35 @@ class PatientMemoryVectorStore:
                 }
                 if "conflicts_with_id" not in memory_columns:
                     connection.execute("ALTER TABLE patient_long_term_memories ADD COLUMN conflicts_with_id TEXT")
+                if "valid_from" not in memory_columns:
+                    connection.execute("ALTER TABLE patient_long_term_memories ADD COLUMN valid_from TEXT")
+                if "valid_to" not in memory_columns:
+                    connection.execute("ALTER TABLE patient_long_term_memories ADD COLUMN valid_to TEXT")
+                if "protected" not in memory_columns:
+                    connection.execute(
+                        "ALTER TABLE patient_long_term_memories ADD COLUMN protected INTEGER NOT NULL DEFAULT 0"
+                    )
+                connection.execute(
+                    """CREATE TABLE IF NOT EXISTS patient_memory_extraction_jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        patient_id TEXT NOT NULL,
+                        conversation_id TEXT NOT NULL,
+                        task_key TEXT NOT NULL,
+                        source_entry_id TEXT NOT NULL UNIQUE,
+                        status TEXT NOT NULL,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        run_after TEXT NOT NULL,
+                        started_at TEXT,
+                        finished_at TEXT,
+                        memories_written INTEGER NOT NULL DEFAULT 0,
+                        last_error TEXT
+                    )"""
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_patient_memory_jobs_due "
+                    "ON patient_memory_extraction_jobs(status, run_after, id)"
+                )
                 connection.execute(
                     """CREATE TABLE IF NOT EXISTS patient_long_term_profiles (
                         patient_id TEXT PRIMARY KEY, summary TEXT NOT NULL,

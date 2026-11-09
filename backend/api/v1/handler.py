@@ -77,6 +77,7 @@ async def _load_patient_profile(patient_id: str, memory_store: Any) -> dict[str,
         "fhir": fhir,
         "memories": memory_store.list_patient_entries(patient_id),
         "memoryProfile": memory_store.build_long_term_profile(patient_id),
+        "memoryExtraction": memory_store.extraction_status(patient_id),
         "retrievals": memory_store.list_retrievals(patient_id, limit=100),
         "sessions": sessions,
         "storage": {

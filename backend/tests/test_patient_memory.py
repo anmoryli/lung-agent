@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
+from backend.runtime.patient_memory_worker import ExtractedMemory, PatientMemoryExtractionWorker
 
 
 class PatientLongTermMemoryTests(unittest.TestCase):
@@ -35,14 +36,16 @@ class PatientLongTermMemoryTests(unittest.TestCase):
             )
         profile = self.store.build_long_term_profile(self.patient_id)
         self.assertNotIn("喜欢短信提醒", profile["summary"])
-        self.assertEqual(self.store.list_patient_entries(self.patient_id)[0]["status"], "expired")
+        expired = self.store.list_patient_entries(self.patient_id)[0]
+        self.assertEqual(expired["status"], "expired")
+        self.assertEqual(expired["valid_to"], expired["expires_at"])
 
     def test_low_weight_items_become_stale_and_are_not_injected(self) -> None:
         self.store.remember(self.patient_id, "喜欢短信提醒", "test-thread", importance=1)
         with sqlite3.connect(self.store.database) as connection:
             connection.execute(
                 "UPDATE patient_long_term_memories SET updated_at=? WHERE patient_id=?",
-                ((datetime.now(timezone.utc) - timedelta(days=120)).isoformat(), self.patient_id),
+                ((datetime.now(timezone.utc) - timedelta(days=240)).isoformat(), self.patient_id),
             )
         profile = self.store.build_long_term_profile(self.patient_id)
         self.assertNotIn("喜欢短信提醒", profile["summary"])
@@ -56,6 +59,7 @@ class PatientLongTermMemoryTests(unittest.TestCase):
         )
         entries = {item["text"]: item for item in self.store.list_patient_entries(self.patient_id)}
         self.assertEqual(entries["用短信联系"]["status"], "superseded")
+        self.assertIsNotNone(entries["用短信联系"]["valid_to"])
         self.assertEqual(entries["改用电话联系"]["status"], "active")
         self.assertIn("改用电话联系", self.store.build_long_term_profile(self.patient_id)["summary"])
 
@@ -70,6 +74,45 @@ class PatientLongTermMemoryTests(unittest.TestCase):
         summary = self.store.build_long_term_profile(self.patient_id)["summary"]
         self.assertNotIn("电话联系", summary)
         self.assertNotIn("短信联系", summary)
+
+    def test_health_constraints_are_marked_protected(self) -> None:
+        self.store.remember(self.patient_id, "自述对青霉素过敏", "test-thread", category="allergy")
+        entry = self.store.list_patient_entries(self.patient_id)[0]
+        self.assertTrue(entry["protected"])
+
+    def test_extraction_queue_is_durable_idempotent_and_recoverable(self) -> None:
+        self.store.enqueue_extraction(self.patient_id, "conversation-1", "turn-1", "source-1")
+        self.store.enqueue_extraction(self.patient_id, "conversation-1", "turn-1", "source-1")
+        job = self.store.claim_extraction_job()
+        self.assertIsNotNone(job)
+        assert job is not None
+
+        with sqlite3.connect(self.store.database) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT COUNT(*) FROM patient_memory_extraction_jobs WHERE source_entry_id='source-1'"
+            ).fetchone()[0], 1)
+            connection.execute(
+                "UPDATE patient_memory_extraction_jobs SET status='processing' WHERE id=?", (job["id"],)
+            )
+
+        # 模拟服务重启：processing 会回到 pending，之后仍能被 worker 领取。
+        self.store.recover_extraction_jobs()
+        recovered = self.store.claim_extraction_job()
+        self.assertEqual(recovered["id"], job["id"])
+        self.store.finish_extraction_job(job["id"], 2)
+        self.assertEqual(self.store.extraction_status(self.patient_id)["latest"]["status"], "done")
+
+    def test_ordinary_extraction_requires_an_exact_source_quote(self) -> None:
+        valid = ExtractedMemory(
+            content="患者偏好短信提醒", category="preference", quote="我更喜欢短信提醒",
+            importance=3, confidence=0.9, expires_in_days=None, relation="new",
+            related_memory_id=None, protected=False, explicit=False,
+        )
+        invented = valid.model_copy(update={"quote": "患者喜欢短信提醒"})
+        explicit = invented.model_copy(update={"explicit": True})
+        self.assertTrue(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", valid))
+        self.assertFalse(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", invented))
+        self.assertTrue(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", explicit))
 
 
 if __name__ == "__main__":

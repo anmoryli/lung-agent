@@ -8,6 +8,8 @@
 
 两份 SQLite 各有职责：会话目录用于列出、显示和切换；checkpointer 用于恢复 Agent 的图状态、TODO 和 HITL 中断点。只复制会话目录中的聊天文字，不会造出缺失的 checkpoint。
 
+用户每轮原话归档后，会向 `patient_memory_extraction_jobs` 写入任务引用。服务启动时后台 worker 恢复 `processing` 状态的任务，按 `PATIENT_MEMORY_EXTRACTION_INTERVAL_SECONDS` 轮询；抽取原话引用校验失败会跳过候选，模型调用失败最多重试 5 次。任务队列和长期记忆共用 `patient-memory-vectors.sqlite3`，复制整个 `storage/` 会保留未完成任务。
+
 同一个 `patient-sessions.sqlite3` 还保存当前调试模型选择及其能力元数据。模型列表从配置的模型服务 `/models` 读取，只有服务端明确返回 `context_window` 与 `max_output_tokens` 的模型才可选。切换模型后，下一轮按该模型的窗口配置 DeepAgents 摘要阈值；运行状态会在 AG-UI `STATE_SNAPSHOT` 中带上模型窗口及输入 token 估算。
 
 实时 Agent 轨迹通过 AG-UI `ACTIVITY_SNAPSHOT` 推送，包含主/专科 Agent 的运行状态、模型标识和流式首片段耗时。状态轨迹不包含模型的隐藏推理文本；只将主 Agent 的最终可见文本作为 `TEXT_MESSAGE_CONTENT` 输出。

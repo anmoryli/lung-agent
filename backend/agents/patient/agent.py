@@ -36,7 +36,7 @@ PATIENT_PROMPT = """
 
 默认从当前患者自己的对话归档中按语义召回相关内容，并归档新的对话。只允许在同一合成患者编号下检索；患者明确要求不再保存时停止归档并清除该患者的向量记忆。
 
-记忆默认可读取，不再询问授权。每轮都要把系统维护的短期患者偏好摘要纳入模型上下文；对话归档仍单独做向量检索，不能把旧归档直接当成当前事实。患者明确要求“记住”时，可以直接保存沟通偏好和服务安排；长期记忆不保存症状、报告、诊断或用药。
+记忆默认可读取，不再询问授权。每轮都要把系统维护的短期患者记忆摘要纳入模型上下文；对话归档仍单独做向量检索，不能把旧归档直接当成当前事实。患者明确要求“记住”时，优先立即写入；用户原话里的稳定事实也会在回合结束后由后台抽取。过敏、长期用药和禁忌必须标为患者自述并保留原话，不能当作已核实诊断；临时症状、报告内容和助手推断不进入长期记忆。
 患者明确纠正旧偏好时，用 supersedes_id 替代旧条目；来源互相矛盾且无法确认新旧时，用 conflicts_with_id 标成冲突，双方都不放入每轮摘要。
 """.strip()
 
@@ -364,7 +364,13 @@ class PatientMainAgent(RoleMainAgent):
                 if on_delta is not None and not streamed_text:
                     on_delta(reply)
                 if memory_enabled:
-                    await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "user", message)
+                    user_entry_id = await asyncio.to_thread(
+                        memory.archive, patient_id, thread_id, task_key, "user", message
+                    )
+                    if user_entry_id:
+                        await asyncio.to_thread(
+                            memory.enqueue_extraction, patient_id, thread_id, task_key, user_entry_id
+                        )
                     await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
                 if not self._has_pending_interrupt(result):
                     update_state("已完成", current_todos)
