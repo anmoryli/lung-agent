@@ -33,10 +33,13 @@ class Gateway:
         agent = self.agents.get(role)
         if agent is None:
             raise UnknownRoleError(role)
+        agent_context = context
+        if role == "patient":
+            agent_context = {**context, "_task_key": task_key}
         return self.idempotency.run_once(
             task_key,
             role,
             message,
             context,
-            lambda: agent.invoke(message, context),
+            lambda: agent.invoke(message, agent_context),
         )

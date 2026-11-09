@@ -50,7 +50,6 @@ class RoleMainAgent:
                     "grep",
                     "ls",
                     "read_file",
-                    "task",
                     "write_file",
                     "write_todos",
                 },

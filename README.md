@@ -73,6 +73,10 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8010/api/v1/agents/patient
 - message：用户问题，必填。
 - context：Gateway 提供的补充业务上下文，可省略。
 
+患者对话可以在 `context` 中提供 `conversationId`，同一会话每轮使用新的 `taskKey`，SQLite checkpoint 会续上对话状态，并按患者编号隔离。`patient_id` 仅接受 `demo-patient-0001` 这种合成编号。患者长期记忆只在 `memoryConsent: true` 时保存 `memoryPreference` 中的 `language`、`communication_style`、`accessibility` 三类表达偏好；传 `memoryConsent: false` 会清除该演示患者的偏好。系统不会保存病历事实。当前接口没有登录认证，不能接真实患者数据。
+
+患者写入工具会先暂停。接口返回确认提示后，用同一 `conversationId` 和新 `taskKey` 再发请求，并在 `context` 传 `approvePendingWrite: true` 才批准；传 `false` 会拒绝。当前确认适用于本地演示，正式环境要由身份认证和授权服务提供患者身份、同意记录及审计。
+
 响应包含 taskKey、role、reply 和 cached。
 
 ## 目录与边界
@@ -81,10 +85,14 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8010/api/v1/agents/patient
 - backend/api/v1/handler.py：HTTP 路由和参数校验。
 - backend/gateway/orchestration/gateway.py：按角色选主 Agent，统一执行任务幂等。
 - backend/agents/{patient,doctor,management,nursing}/agent.py：四个 DeepAgents 角色主 Agent。
+- backend/agents/patient/subagents.py：患者 8 个子 Agent 的职责、提示词和工具白名单。
+- backend/integrations/patient_mcp.py：FHIR MCP 工具筛选与患者/确认参数绑定。
 - backend/shared/tasking/idempotency_store.py：SQLite taskKey 回复缓存。
 - docs/architecture/agent-topology.md：请求流程和架构边界。
 
-主 Agent 目前只根据请求和传入上下文生成文字回复，没有接入子 Agent、FHIR、MCP、知识检索、登录授权或 ServiceCase 持久化。此阶段请使用合成数据。
+Gateway 是 HTTP 和任务编排唯一入口。患者主 Agent 在 Gateway 调用内部委派到 8 个隔离子 Agent；子 Agent 各自只拿到工作所需的 FHIR MCP 工具。会话 checkpoint 和患者表达偏好使用 SQLite。写工具由 DeepAgents HITL 暂停，患者确认后才发给 FHIR MCP。
+
+当前只接入本地合成患者。医保只查询已有 Coverage，不计算账单或报销；上门护理只有资料核对和待核实草稿，没有正式申请与派单状态机。没有登录认证，因此不得接入真实患者数据。
 
 ## AG-UI 文档
 

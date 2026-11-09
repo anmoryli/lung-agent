@@ -1,5 +1,7 @@
-﻿# 患者主 Agent
+# 患者 Agent
 
-agent.py 使用 DeepAgents 创建患者角色主 Agent，面向患者和家属整理问题并说明下一步。它不诊断、不调整医嘱，也不直接调用子 Agent；患者端输出不展示内部标签或实现细节。
+`agent.py` 是 Gateway 内患者流程的唯一编排器。它识别目标后委派一个子 Agent，管理会话 checkpoint、长期沟通偏好和 MCP 工具确认。医疗判断、检查必要性、费用资格和服务履约都不由模型决定。
 
-当前没有接入患者病历、报告或外部服务工具。
+`subagents.py` 定义 8 个子 Agent 的职责、中文提示词和最小工具白名单。读取工具只会用于 `demo-patient-NNNN` 合成患者；写入工具先由 DeepAgents HITL 暂停，患者明确确认后才传给 FHIR MCP。
+
+本地使用 `context.conversationId` 续接对话，同一会话会按合成患者编号隔离。`memoryConsent: true` 才会保存白名单中的沟通偏好；传 `false` 会清除偏好。临床事实不写入长期记忆。当前 API 没有登录认证，因此只适用于合成数据演示。
