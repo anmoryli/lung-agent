@@ -6,13 +6,8 @@
     const stopButton = document.querySelector("#stopButton");
     const patientId = document.querySelector("#patientId");
     const welcome = document.querySelector("#welcome");
-    const agentProgress = document.querySelector("#agentProgress");
-    const agentStatus = document.querySelector("#agentStatus");
-    const agentTodos = document.querySelector("#agentTodos");
-    const agentTimeline = document.querySelector("#agentTimeline");
     const modelSelect = document.querySelector("#modelSelect");
     const modelContext = document.querySelector("#modelContext");
-    const modelUsage = document.querySelector("#modelUsage");
     const profileDialog = document.querySelector("#profileDialog");
     const profilePanel = document.querySelector("#profilePanel");
     const profileTabs = document.querySelector("#profileTabs");
@@ -30,16 +25,12 @@
       return tokens.toLocaleString();
     }
 
-    function updateModelContext(model, estimatedInput = 0) {
+    function updateModelContext(model) {
       if (!model) return;
       const windowTokens = Number(model.context_window || model.contextWindow || 0);
       const inputBudget = Number(model.input_budget_tokens || model.inputBudgetTokens || Math.max(0, windowTokens - (model.max_output_tokens || model.maxOutputTokens || 0)));
       const maxOutput = Number(model.max_output_tokens || model.maxOutputTokens || 0);
-      const summaryAt = Number(model.summarization_trigger_tokens || model.summarizationTriggerTokens || Math.round(inputBudget * 0.85));
       modelContext.textContent = `${model.name || model.display_name || model.id || model.model_id} · 总窗口 ${formatTokens(windowTokens)} · 输入预算 ${formatTokens(inputBudget)} · 最大输出 ${formatTokens(maxOutput)}`;
-      modelUsage.textContent = estimatedInput
-        ? `本轮输入估算 ${formatTokens(estimatedInput)} / ${formatTokens(inputBudget)} · 摘要触发线约 ${formatTokens(summaryAt)}`
-        : `总窗口 ${formatTokens(windowTokens)} · 预留输出后输入预算 ${formatTokens(inputBudget)} · 摘要触发线约 ${formatTokens(summaryAt)}`;
     }
 
     async function loadModels() {
@@ -82,31 +73,31 @@
       return `${prefix}-${crypto.randomUUID()}`;
     }
 
-    function renderAgentState(snapshot) {
-      if (!snapshot || typeof snapshot !== "object") return;
-      agentProgress.hidden = false;
-      agentStatus.textContent = snapshot.activity || "正在处理";
-      agentTodos.replaceChildren();
+    function renderAgentState(snapshot, view) {
+      if (!snapshot || typeof snapshot !== "object" || !view) return;
+      view.progress.hidden = false;
+      view.status.textContent = snapshot.activity || "正在处理";
+      view.todos.replaceChildren();
       for (const todo of Array.isArray(snapshot.todos) ? snapshot.todos : []) {
         if (!todo || typeof todo.content !== "string") continue;
         const item = document.createElement("li");
         item.textContent = todo.content;
         item.dataset.status = ["pending", "in_progress", "completed"].includes(todo.status) ? todo.status : "pending";
-        agentTodos.append(item);
+        view.todos.append(item);
       }
-      agentTodos.hidden = agentTodos.childElementCount === 0;
-      if (snapshot.model) updateModelContext(snapshot.model, snapshot.model.estimated_input_tokens);
+      view.todos.hidden = view.todos.childElementCount === 0;
+      if (snapshot.model) {
+        const model = snapshot.model;
+        const budget = Number(model.input_budget_tokens || model.inputBudgetTokens || 0);
+        const estimate = Number(model.estimated_input_tokens || 0);
+        updateModelContext(model);
+        view.usage.textContent = estimate && budget ? `输入估算 ${formatTokens(estimate)} / ${formatTokens(budget)}` : "";
+        view.usage.hidden = !view.usage.textContent;
+      }
     }
 
-    function clearAgentState() {
-      agentProgress.hidden = true;
-      agentStatus.textContent = "";
-      agentTodos.replaceChildren();
-      agentTimeline.replaceChildren();
-      modelUsage.textContent = "";
-    }
-
-    function renderAgentTimeline(content) {
+    function renderAgentTimeline(content, view) {
+      if (!view) return;
       const entries = Array.isArray(content?.items) ? content.items : [];
       const agentNames = {
         patient: "患者主 Agent",
@@ -119,8 +110,8 @@
         consultation_prep: "问诊准备 Agent",
         home_care_request: "上门护理申请 Agent",
       };
-      agentProgress.hidden = false;
-      agentTimeline.replaceChildren();
+      view.progress.hidden = false;
+      view.timeline.replaceChildren();
       for (const entry of entries.slice().sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))) {
         const row = document.createElement("li");
         row.dataset.active = String(!/完成|结束|失败/.test(entry.status || ""));
@@ -140,9 +131,9 @@
         timing.className = "trace-first-token";
         timing.textContent = entry.first_output_ms == null ? "等待首片段" : `首 token ${entry.first_output_ms} ms`;
         row.append(dot, main, timing);
-        agentTimeline.append(row);
+        view.timeline.append(row);
       }
-      agentTimeline.scrollTop = 0;
+      view.timeline.scrollTop = 0;
     }
 
     function profileCard(title, value, subtitle = "") {
@@ -320,8 +311,6 @@
         pendingInterrupts: saved.pending_interrupts || [],
       };
       patientId.value = state.patientId;
-      if (state.agentState && Object.keys(state.agentState).length) renderAgentState(state.agentState);
-      else clearAgentState();
       renderHistory();
       renderSessionCatalog();
     }
@@ -339,9 +328,32 @@
       row.className = `message ${message.role}${isError ? " message-error" : ""}`;
       const bubble = document.createElement("div");
       bubble.className = `bubble${pending ? " pending" : ""}`;
-      if (message.role === "assistant") renderMarkdown(bubble, message.content);
-      else bubble.textContent = message.content;
+      const content = document.createElement("div");
+      if (message.role === "assistant") renderMarkdown(content, message.content);
+      else content.textContent = message.content;
+      bubble.append(content);
+      let progress = null;
       if (message.role === "assistant") {
+        const section = document.createElement("section");
+        section.className = "agent-progress";
+        section.setAttribute("aria-live", "polite");
+        section.hidden = true;
+        const heading = document.createElement("div");
+        heading.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:10px";
+        const status = document.createElement("div");
+        status.className = "agent-progress-title";
+        const usage = document.createElement("div");
+        usage.className = "model-usage";
+        usage.hidden = true;
+        heading.append(status, usage);
+        const timeline = document.createElement("ol");
+        timeline.className = "agent-timeline";
+        timeline.setAttribute("aria-label", "Agent 实时运行轨迹");
+        const todos = document.createElement("ol");
+        todos.className = "agent-todos";
+        section.append(heading, timeline, todos);
+        bubble.append(section);
+        progress = { progress: section, status, usage, timeline, todos };
         const avatar = document.createElement("div");
         avatar.className = "avatar";
         avatar.textContent = "✳";
@@ -351,7 +363,7 @@
       }
       conversation.append(row);
       scrollToBottom();
-      return { row, bubble };
+      return { row, bubble, content, progress };
     }
 
     function renderMarkdown(target, source) {
@@ -539,7 +551,7 @@
       const controller = new AbortController();
       activeController = controller;
       setBusy(true);
-      renderAgentState({ activity: "\u6b63\u5728\u8fde\u63a5\u670d\u52a1", todos: [] });
+      renderAgentState({ activity: "\u6b63\u5728\u8fde\u63a5\u670d\u52a1", todos: [] }, rendered.progress);
       let streamError = null;
       try {
         const body = {
@@ -580,14 +592,14 @@
             let event;
             try { event = JSON.parse(data); } catch { continue; }
             if (event.type === "RUN_STARTED") {
-      renderAgentState({ activity: "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", todos: [] });
+              renderAgentState({ activity: "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", todos: [] }, rendered.progress);
             } else if (event.type === "STATE_SNAPSHOT") {
-              renderAgentState(event.snapshot);
+              renderAgentState(event.snapshot, rendered.progress);
             } else if (event.type === "ACTIVITY_SNAPSHOT") {
-              renderAgentTimeline(event.content);
+              renderAgentTimeline(event.content, rendered.progress);
             } else if (event.type === "TEXT_MESSAGE_CONTENT") {
               assistant.content += event.delta || "";
-              renderMarkdown(rendered.bubble, assistant.content);
+              renderMarkdown(rendered.content, assistant.content);
               rendered.bubble.classList.add("pending");
               scrollToBottom();
             } else if (event.type === "RUN_FINISHED") {
@@ -614,7 +626,7 @@
         }
       } finally {
         runState.pendingInterrupts = pendingInterrupts;
-        renderMarkdown(rendered.bubble, assistant.content);
+        renderMarkdown(rendered.content, assistant.content);
         if (pendingInterrupts.length) showInterrupt(rendered.bubble, pendingInterrupts);
         rendered.bubble.classList.remove("pending");
         refreshSessionCatalog().catch(error => console.warn("刷新会话列表失败", error));
@@ -645,7 +657,6 @@
     document.querySelector("#newChat").addEventListener("click", () => {
       activeController?.abort();
       state = { threadId: newId("patient-chat"), messages: [], patientId: patientId.value.trim() || "demo-patient-0001" };
-      clearAgentState();
       renderHistory();
       renderSessionCatalog();
       input.focus();
