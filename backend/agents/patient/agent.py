@@ -228,10 +228,10 @@ class PatientMainAgent(RoleMainAgent):
                         decision = {"type": "approve" if approval else "reject"}
                         if not approval:
                             decision["message"] = "患者没有同意这次写入。"
-                    decisions = {
-                        interrupt.id: {"decisions": [decision]}
-                        for interrupt in interrupts
-                    }
+                        decisions = {
+                            interrupt.id: {"decisions": [decision]}
+                            for interrupt in interrupts
+                        }
                     resumed = await graph.ainvoke(
                         Command(resume=decisions),
                         config=config,
