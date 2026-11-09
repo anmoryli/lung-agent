@@ -15,6 +15,7 @@
       AGENT_STORAGE_PATH: /app/storage
       AGENT_MODEL_DIR: /app/models
       AGENT_CORS_ORIGINS: ${AGENT_CORS_ORIGINS:-*}
+      AGENT_AGUI_PUSH_STATE: ${AGENT_AGUI_PUSH_STATE:-true}
       FHIR_MCP_URL: ${FHIR_MCP_URL:-http://host.docker.internal:8001/mcp}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
       FHIR_MCP_HOST_HEADER: ${FHIR_MCP_HOST_HEADER:-localhost:8001}

@@ -6,6 +6,9 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     const stopButton = document.querySelector("#stopButton");
     const patientId = document.querySelector("#patientId");
     const welcome = document.querySelector("#welcome");
+    const agentProgress = document.querySelector("#agentProgress");
+    const agentStatus = document.querySelector("#agentStatus");
+    const agentTodos = document.querySelector("#agentTodos");
     let state = readState();
     let activeController = null;
 
@@ -26,6 +29,27 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     function saveState() {
       state.patientId = patientId.value.trim() || "demo-patient-0001";
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function renderAgentState(snapshot) {
+      if (!snapshot || typeof snapshot !== "object") return;
+      agentProgress.hidden = false;
+      agentStatus.textContent = snapshot.activity || "正在处理";
+      agentTodos.replaceChildren();
+      for (const todo of Array.isArray(snapshot.todos) ? snapshot.todos : []) {
+        if (!todo || typeof todo.content !== "string") continue;
+        const item = document.createElement("li");
+        item.textContent = todo.content;
+        item.dataset.status = ["pending", "in_progress", "completed"].includes(todo.status) ? todo.status : "pending";
+        agentTodos.append(item);
+      }
+      agentTodos.hidden = agentTodos.childElementCount === 0;
+    }
+
+    function clearAgentState() {
+      agentProgress.hidden = true;
+      agentStatus.textContent = "";
+      agentTodos.replaceChildren();
     }
 
     function addMessage(role, content) {
@@ -276,7 +300,9 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
             if (!data) continue;
             let event;
             try { event = JSON.parse(data); } catch { continue; }
-            if (event.type === "TEXT_MESSAGE_CONTENT") {
+            if (event.type === "STATE_SNAPSHOT") {
+              renderAgentState(event.snapshot);
+            } else if (event.type === "TEXT_MESSAGE_CONTENT") {
               assistant.content += event.delta || "";
               renderMarkdown(rendered.bubble, assistant.content);
               rendered.bubble.classList.add("pending");
@@ -335,6 +361,7 @@ const STORAGE_KEY = "deepagents.patient-chat.v1";
     document.querySelector("#newChat").addEventListener("click", () => {
       activeController?.abort();
       state = { threadId: newId("patient-chat"), messages: [], patientId: patientId.value.trim() || "demo-patient-0001" };
+      clearAgentState();
       saveState();
       renderHistory();
       input.focus();

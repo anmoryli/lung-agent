@@ -142,7 +142,19 @@ class PatientMainAgent(RoleMainAgent):
         context: dict[str, Any],
         on_delta: Callable[[str], None] | None = None,
         on_interrupt: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_state: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
+        current_todos: list[dict[str, str]] = []
+        current_activity = "正在准备本轮处理"
+
+        def update_state(activity: str, todos: list[dict[str, str]] | None = None) -> None:
+            nonlocal current_activity, current_todos
+            current_activity = activity
+            if todos is not None:
+                current_todos = todos
+            if on_state is not None:
+                on_state({"activity": current_activity, "todos": current_todos})
+
         if not os.getenv("OPENAI_API_KEY", "").strip():
             raise AgentConfigurationError("请先配置 OPENAI_API_KEY。")
         model = os.getenv("DEEPAGENTS_MODEL", "openai:gpt-4.1-mini").strip()
@@ -175,7 +187,7 @@ class PatientMainAgent(RoleMainAgent):
             "openai",
             HarnessProfile(
                 general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
-                excluded_tools={"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file", "write_todos"},
+                excluded_tools={"delete", "edit_file", "execute", "glob", "grep", "ls", "read_file", "write_file"},
             ),
         )
 
@@ -183,15 +195,19 @@ class PatientMainAgent(RoleMainAgent):
         memory_enabled = self._memory_enabled(context, message)
         if not memory_enabled:
             await asyncio.to_thread(memory.delete_patient, patient_id)
+        elif on_state is not None:
+            update_state("正在查找相关历史记忆")
         recalled = await asyncio.to_thread(memory.search, patient_id, message, 4) if memory_enabled else []
         memory_tool = lambda query: memory.search(patient_id, query, limit=5)
         remember = lambda content: memory.remember(patient_id, content, thread_id)
 
+        update_state("正在连接患者资料")
         async with MCPAdapter(mcp_transport()) as adapter:
             available = {item.name: item for item in await adapter.list_tools()}
             if self._is_generic_booking_request(message):
                 appointment_tool = available.get("search_appointments")
                 if appointment_tool is not None:
+                    update_state("正在查询已有预约")
                     result = await appointment_tool.ainvoke({"patient_id": patient_id})
                     existing_appointment = self._existing_clinic_appointment(result)
                     if existing_appointment:
@@ -200,6 +216,7 @@ class PatientMainAgent(RoleMainAgent):
                             await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", existing_appointment)
                         if on_delta is not None:
                             on_delta(existing_appointment)
+                        update_state("已完成", [])
                         return existing_appointment
 
             registry = PatientAgentRegistry()
@@ -226,6 +243,7 @@ class PatientMainAgent(RoleMainAgent):
                 if approval not in (None, True, False):
                     raise ValueError("approvePendingWrite 只能是 true 或 false。")
                 if approval is not None or agui_resume is not None:
+                    update_state("正在恢复待确认操作")
                     state = await graph.aget_state(config)
                     interrupts = [
                         interrupt
@@ -248,12 +266,15 @@ class PatientMainAgent(RoleMainAgent):
                         config=config,
                     )
                     if self._has_pending_interrupt(resumed) and on_interrupt is not None:
+                        update_state("等待你确认", current_todos)
                         on_interrupt(self._agui_interrupts(resumed))
                     reply = self._last_reply(resumed)
                     if on_delta is not None:
                         on_delta(reply)
                     if memory_enabled:
                         await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
+                    if not self._has_pending_interrupt(resumed):
+                        update_state("已完成", current_todos)
                     return reply
 
                 prompt = message.strip()
@@ -262,6 +283,7 @@ class PatientMainAgent(RoleMainAgent):
                         self._public_context(context), ensure_ascii=False
                     )
                 request_state = {"messages": [{"role": "user", "content": prompt}]}
+                update_state("正在理解你的问题")
                 if on_delta is None:
                     result = await graph.ainvoke(request_state, config=config)
                 else:
@@ -269,8 +291,21 @@ class PatientMainAgent(RoleMainAgent):
                     async for event in graph.astream_events(request_state, config=config, version="v2"):
                         metadata = event.get("metadata", {})
                         namespace = metadata.get("langgraph_checkpoint_ns", "")
+                        event_name = event.get("event")
+                        if not namespace or "|" not in namespace:
+                            if event_name == "on_chat_model_start":
+                                update_state("正在理解和整理答复")
+                            elif event_name == "on_tool_start":
+                                tool_name = event.get("name", "")
+                                if tool_name == "write_todos":
+                                    current_todos = self._agui_todos_from_tool_input(
+                                        event.get("data", {}).get("input", {})
+                                    )
+                                    update_state("正在更新处理计划", current_todos)
+                                else:
+                                    update_state(self._agui_activity_for_tool(tool_name))
                         if (
-                            event.get("event") == "on_chat_model_stream"
+                            event_name == "on_chat_model_stream"
                             and (not namespace or "|" not in namespace)
                         ):
                             chunk = event.get("data", {}).get("chunk")
@@ -285,12 +320,15 @@ class PatientMainAgent(RoleMainAgent):
                         result["__interrupt__"] = interrupts
                 reply = self._approval_summary(result) if self._has_pending_interrupt(result) else self._last_reply(result)
                 if self._has_pending_interrupt(result) and on_interrupt is not None:
+                    update_state("等待你确认", current_todos)
                     on_interrupt(self._agui_interrupts(result))
                 if on_delta is not None and not streamed_text:
                     on_delta(reply)
                 if memory_enabled:
                     await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "user", message)
                     await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
+                if not self._has_pending_interrupt(result):
+                    update_state("已完成", current_todos)
                 return reply
 
     @staticmethod
@@ -373,6 +411,38 @@ class PatientMainAgent(RoleMainAgent):
             }
             for item in pending
         ]
+
+    @staticmethod
+    def _agui_todos_from_tool_input(tool_input: Any) -> list[dict[str, str]]:
+        """只把计划文字和进度状态发给页面，不转发工具的其它参数。"""
+        if not isinstance(tool_input, dict) or not isinstance(tool_input.get("todos"), list):
+            return []
+        todos = []
+        for item in tool_input["todos"]:
+            if not isinstance(item, dict) or not isinstance(item.get("content"), str):
+                continue
+            status = item.get("status")
+            if status not in ("pending", "in_progress", "completed"):
+                status = "pending"
+            todos.append({"content": item["content"].strip()[:180], "status": status})
+        return todos[:12]
+
+    @staticmethod
+    def _agui_activity_for_tool(tool_name: str) -> str:
+        """把内部工具调用映射成患者看得懂的简短状态。"""
+        if tool_name == "task":
+            return "正在处理相关事项"
+        if tool_name == "discover_patient_agents":
+            return "正在查找合适的专科助手"
+        if tool_name == "search_patient_history":
+            return "正在查找之前的对话"
+        if tool_name == "save_patient_memory":
+            return "正在保存你要求记住的信息"
+        if tool_name.startswith("search_") or tool_name.startswith("get_"):
+            return "正在查阅患者资料"
+        if tool_name.startswith("create_") or tool_name.startswith("update_"):
+            return "正在准备一项待确认的操作"
+        return "正在处理当前事项"
 
     @staticmethod
     def _approval_summary(result: Any) -> str:

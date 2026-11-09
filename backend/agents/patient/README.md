@@ -1,9 +1,66 @@
-# 患者 Agent
+# 患者 Agent 怎么分工
 
-`agent.py` 是患者主 Agent。它每轮都从 `registry.py` 发现专科 Agent，主模型用 DeepAgents 原生 `task` 工具分派任务。`tools.py` 里的 LangChain `@tool` 向主模型注册专科发现、历史检索和长期记忆保存工具；用户明确要求“记住”时，直接保存非临床偏好，不再询问同意。
+## 目录角色
 
-每个专科的 `agent.py` 放在自己的目录里，里面写清职责、提示词和允许使用的 FHIR MCP 工具。Gateway 初始化时只把所需工具 schema 放进被选中子 Agent；主 Agent 不会收到整套 MCP 工具列表。
+```text
+patient/
+├── agent.py                 患者主 Agent：识别诉求、查工具目录、派发一次专科任务
+├── tools.py                 主 Agent 自己能用的 3 个业务工具
+├── specialist.py            专科定义的数据结构；它本身不运行模型
+├── registry.py              扫描各专科目录，把定义转换成 DeepAgents 子 Agent 配置
+├── symptom_safety_triage/
+├── report/
+├── exam_order/
+├── consultation_prep/
+├── psychological_support/
+├── insurance_cost/
+├── transport_companion/
+└── home_care_request/       每个专科目录的 agent.py 声明职责、提示词、读写工具名单
+```
 
-会话 checkpoint 负责还原同一会话的完整状态；`backend/integrations/memory/vector_store.py` 用 `BAAI/bge-small-zh-v1.5` 和 `sqlite-vec` 分开保存长期记忆与会话归档，默认跨会话按语义召回。传 `memoryConsent: false` 或对话里要求停止保存，会清除该演示患者的向量记忆。
+`specialist.py` 里的 `PatientSpecialist` 是一份专科配置合同，字段包括名称、职责、提示词和 MCP 读写工具白名单。每个子目录中的 `agent.py` 创建一份 `SPECIALIST` 配置。`registry.py` 找到这些配置后，组装成 DeepAgents 原生子 Agent 描述，再由 DeepAgents 的 `task` 工具运行被选中的专科。这里没有第二个独立 Gateway，也没有 `specialist.py` 自己启动的 Agent。
 
-患者 ID 目前只允许 `demo-patient-NNNN` 合成编号。写操作通过 DeepAgents interrupt 暂停，经 AG-UI `resume` 得到明确批准后才进入 MCP。
+## 主 Agent 可用工具
+
+主 Agent 在一次请求里能看到：
+
+| 工具 | 用途 |
+|---|---|
+| `discover_patient_agents` | 查找专科名称和职责摘要，不返回全部 MCP schema |
+| `search_patient_history` | 按语义检索这位合成患者的会话归档 |
+| `save_patient_memory` | 用户要求记住信息时，写入长期记忆；停用记忆时不注册 |
+| DeepAgents `task` | 把当前任务交给一个已注册的专科子 Agent |
+| DeepAgents `write_todos` | 维护当前任务计划；AG-UI 状态推送开启时同步显示计划 |
+
+`task` 和 `write_todos` 是 DeepAgents 的内建工具。FHIR MCP 的查询和写入工具不直接给主 Agent，因此主 Agent 不能自行读写病历。
+
+## 专科子 Agent 的工具白名单
+
+每个专科只拿到表内工具；写工具会在执行前触发 HITL 确认。
+
+| 专科 | 可读 FHIR MCP 工具 | 可写 FHIR MCP 工具 |
+|---|---|---|
+| 症状与安全分流 | `get_patient_summary`, `search_observations`, `search_conditions`, `search_medication_requests`, `search_allergies` | 无 |
+| 报告 | `search_reports`, `get_report`, `search_documents`, `get_document`, `get_report_pdf` | 无 |
+| 检查与医嘱 | `search_service_requests`, `search_medication_requests`, `search_appointments`, `search_observations` | `create_service_request_draft`, `create_appointment` |
+| 问诊准备 | `get_patient_summary`, `search_encounters`, `search_reports`, `search_documents`, `search_service_requests`, `search_appointments` | 无 |
+| 心理支持 | `get_patient_summary` | `create_service_case`, `create_task` |
+| 医保与费用 | `search_coverages`, `search_encounters` | `create_service_case`, `create_task` |
+| 交通与陪同 | `search_appointments`, `search_healthcare_services`, `search_organizations` | `create_appointment`, `create_service_case`, `create_task` |
+| 上门护理申请 | `search_healthcare_services`, `search_care_plans`, `search_service_requests`, `search_consents`, `search_allergies` | `create_service_case`, `create_task` |
+
+白名单定义在各专科目录的 `agent.py`，`registry.py` 会在建图时检查 MCP 服务是否提供这些工具，并只把对应 schema 装进该子 Agent。服务端还会固定绑定患者 ID 和任务键；模型不能通过工具参数替换这些值。
+
+## 状态和持久化位置
+
+- `AGENT_STORAGE_PATH/patient-checkpoints.sqlite3`：LangGraph 会话 checkpoint，包括消息、TODO 状态和 HITL 暂停点。Docker 默认挂载到 `agent-service/storage/`。
+- `AGENT_STORAGE_PATH/patient-memory-vectors.sqlite3`：BGE 向量索引，包含 `long_term` 记忆和 `archive` 会话归档。
+- `backend/runtime/active_runs.py`：当前 SSE 连接、运行 Future、生成取消标记只在进程内存里；进程重启后不会保留正在生成的运行状态。
+
+迁移单机时，停掉服务后复制整个 `storage/`，在新机器上继续使用同一个 `AGENT_STORAGE_PATH` 和 `threadId`。另需配置模型密钥、FHIR MCP 地址与凭据、模型目录。若只迁移 Agent，不迁移 HAPI 数据库，FHIR 资源留在原服务器；整套环境迁移时还要单独迁移 MCP/HAPI 的数据库卷。当前 SQLite checkpoint 适合单机演示，不适合多副本同时共享写入。
+
+## 当前记忆写入时机
+
+当前实现没有“每轮自动抽取长期记忆”的步骤：主模型判断用户明确要求记住时才会调用 `save_patient_memory`。每轮成功对话的用户消息和助手回复会另外写入向量库的 `archive` 类别；新请求开始时会先按患者 ID 和当前问题取回 4 条最相近记录，模型还可以按需调用 `search_patient_history` 取回最多 5 条。当前检索只有向量距离排序，没有按有效期淘汰、事实冲突版本、BM25/图谱融合或精排。
+
+这表示“对话归档”目前也会索引原始对话内容，即使提示词要求长期记忆只记非临床偏好。数据库中的 `kind` 做了分类，但召回查询仍同时检索 `archive` 和 `long_term`。下一步记忆治理应按 `docs/architecture/patient-memory-design.md` 的博客对照说明拆分写入规则、有效期和召回过滤。

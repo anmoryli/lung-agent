@@ -20,6 +20,7 @@ from ag_ui.core import (
     RunErrorEvent,
     RunFinishedEvent,
     RunStartedEvent,
+    StateSnapshotEvent,
     TextMessageContentEvent,
     TextMessageEndEvent,
     TextMessageStartEvent,
@@ -168,6 +169,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     for item in run_input.resume
                 ]
             events: queue.Queue = queue.Queue()
+            push_state = os.getenv("AGENT_AGUI_PUSH_STATE", "true").strip().lower() in {"1", "true", "yes", "on"}
             if not active_runs.reserve(run_input.run_id, run_input.thread_id, events):
                 self._send_json(
                     HTTPStatus.CONFLICT,
@@ -176,15 +178,22 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 return
 
             async def run_patient():
+                def send_state(snapshot: dict) -> None:
+                    if push_state:
+                        events.put(("state", snapshot))
+
                 if agent._needs_urgent_care(message):
+                    send_state({"activity": "正在提供安全提醒", "todos": []})
                     reply = "你提到了需要尽快处理的情况。如果这些症状现在正在发生，或你担心自己会受伤，请马上联系当地急救或去最近的急诊；也请让身边可信任的人陪着你。"
                     events.put(("delta", reply))
+                    send_state({"activity": "已完成", "todos": []})
                     return reply
                 return await agent._invoke_patient(
                     message,
                     context,
                     lambda delta: events.put(("delta", delta)),
                     lambda interrupts: events.put(("interrupt", interrupts)),
+                    send_state,
                 )
 
             future = submit_async(run_patient())
@@ -234,6 +243,11 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     ))
                 elif kind == "interrupt":
                     interrupted = value
+                elif kind == "state":
+                    self._write_event(encoder, StateSnapshotEvent(
+                        type=EventType.STATE_SNAPSHOT,
+                        snapshot=value,
+                    ))
                 elif kind == "done":
                     if not streamed and value:
                         self._write_event(encoder, TextMessageContentEvent(
@@ -255,6 +269,11 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     self._write_event(encoder, finished)
                     break
                 elif kind == "error":
+                    if push_state:
+                        self._write_event(encoder, StateSnapshotEvent(
+                            type=EventType.STATE_SNAPSHOT,
+                            snapshot={"activity": "本轮没有完成", "todos": []},
+                        ))
                     self._write_event(encoder, RunErrorEvent(
                         type=EventType.RUN_ERROR,
                         message="患者 Agent 本轮运行失败，请查看服务日志。",

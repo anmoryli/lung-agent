@@ -117,6 +117,24 @@ curl.exe -N "http://localhost:8010/api/v1/agents/patient/ag-ui" -H "Content-Type
 
 响应包含 taskKey、role、reply 和 cached。
 
+### AG-UI 实时状态
+
+服务可额外发送 AG-UI `STATE_SNAPSHOT`。当前快照只包含患者可见的阶段状态和 DeepAgents `write_todos` 计划，不发送模型隐藏推理文本：
+
+```json
+{
+  "type": "STATE_SNAPSHOT",
+  "snapshot": {
+    "activity": "正在查阅患者资料",
+    "todos": [{"content": "查找已有报告", "status": "in_progress"}]
+  }
+}
+```
+
+前端把它显示在对话上方。默认启用；设置 `AGENT_AGUI_PUSH_STATE=false` 后，服务停止发送这些状态事件，文字 SSE、HITL 和对话不受影响。状态推送是服务端到前端的展示通道；当前前端不会把修改后的状态回传给 Agent。
+
+AG-UI 还定义 `STATE_DELTA` 和 Activity 事件；本服务目前用完整快照同步这份很小的状态对象。
+
 ## 目录与边界
 
 - backend/app.py：HTTP 服务启动入口。
