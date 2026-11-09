@@ -96,8 +96,8 @@ class PatientMemoryExtractionWorker:
         model_id = selected["model_id"] if selected else os.getenv(
             "DEEPAGENTS_MODEL", "openai:deepseek-flash"
         ).split(":", 1)[-1]
-        model = init_chat_model(f"openai:{model_id}", timeout=30)
-        extractor = model.with_structured_output(MemoryExtractionResult, method="function_calling")
+        model = init_chat_model(f"openai:{model_id}", timeout=30, max_tokens=2048)
+        extractor = self._create_extractor(model)
         active_memories = self.memory.active_long_term_memories(job["patient_id"])
         result = extractor.invoke(
             self._prompt(source, active_memories, current_time_context()),
@@ -137,6 +137,11 @@ class PatientMemoryExtractionWorker:
         return written
 
     @staticmethod
+    def _create_extractor(model: Any) -> Any:
+        """走 JSON Output，别让 LangChain 把 schema 转成强制 tool_choice。"""
+        return model.with_structured_output(MemoryExtractionResult, method="json_mode")
+
+    @staticmethod
     def _quote_is_acceptable(source: str, candidate: ExtractedMemory) -> bool:
         """普通事实必须有逐字证据；显式写入由意图识别单独兜底。"""
         return candidate.explicit or bool(candidate.quote.strip() and candidate.quote.strip() in source)
@@ -152,6 +157,9 @@ class PatientMemoryExtractionWorker:
 - “记住”“以后都”“别忘了”“写入记忆”等语义明确要求长期保存时，标 explicit=true；不要只看关键词。
 - 如果用户明确更新现有事实，relation=supersedes；冲突但不能判断新旧时 relation=conflicts。只有确实对应现有条目时才填写 related_memory_id。
 - 不确定就返回空列表。不要为了填满结果编造内容。
+- 请只输出 json 格式的有效对象，不要加 Markdown 代码块。输出格式如下：
+{{"memories":[{{"content":"患者偏好短信联系","category":"preference","quote":"我更喜欢短信联系","importance":3,"confidence":0.95,"expires_in_days":null,"relation":"new","related_memory_id":null,"protected":false,"explicit":true}}]}}
+没有候选记忆时输出：{{"memories":[]}}
 
 本轮时间基准：
 {time_context}

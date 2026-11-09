@@ -1,5 +1,13 @@
 # Agent Service TODO
 
+## DeepSeek 记忆抽取结构化输出兼容
+
+- [x] 核对 DeepSeek Thinking 模式和 JSON Output 官方接口约束。
+- [x] 将记忆抽取从强制函数调用改为 JSON Output，继续用 Pydantic 校验字段。
+- [x] 增加请求方式与 JSON 内容校验回归。
+- [x] 用当前 DeepSeek 配置真实抽取一条合成记忆，重建并检查服务。
+- [x] 复核并提交。
+
 ## 模型时间感知
 
 - [x] 核对 Python 标准库的时区支持与 Agent/专科/记忆抽取模型入口。

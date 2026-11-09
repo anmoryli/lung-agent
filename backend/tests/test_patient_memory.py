@@ -9,7 +9,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
-from backend.runtime.patient_memory_worker import ExtractedMemory, PatientMemoryExtractionWorker
+from backend.runtime.patient_memory_worker import (
+    ExtractedMemory, MemoryExtractionResult, PatientMemoryExtractionWorker,
+)
 
 
 class PatientLongTermMemoryTests(unittest.TestCase):
@@ -113,6 +115,24 @@ class PatientLongTermMemoryTests(unittest.TestCase):
         self.assertTrue(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", valid))
         self.assertFalse(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", invented))
         self.assertTrue(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", explicit))
+
+    def test_memory_extractor_uses_json_mode_instead_of_forced_tool_call(self) -> None:
+        class ModelSpy:
+            def __init__(self) -> None:
+                self.schema = None
+                self.method = ""
+
+            def with_structured_output(self, schema, method: str):
+                self.schema = schema
+                self.method = method
+                return "extractor"
+
+        model = ModelSpy()
+        result = PatientMemoryExtractionWorker._create_extractor(model)
+        self.assertEqual(result, "extractor")
+        self.assertIs(model.schema, MemoryExtractionResult)
+        self.assertEqual(model.method, "json_mode")
+        self.assertIn('"memories":[]', PatientMemoryExtractionWorker._prompt("原话", []))
 
     def test_vector_recall_deduplicates_repeated_archive_text(self) -> None:
         # 固定测试向量，只验证 sqlite-vec 的候选结果是否会按文本合并。
