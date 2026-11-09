@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f5ef">
-  <title>患者对话 · OpenClaw</title>
+  <title>患者对话 · DeepAgents</title>
   <style>
     :root {
       color-scheme: light;
@@ -52,6 +52,20 @@
     .message { display: flex; gap: 12px; max-width: 760px; margin: 0 auto 25px; animation: rise .22s ease both; }
     .message.user { justify-content: flex-end; }
     .avatar { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border-radius: 11px 11px 11px 3px; background: var(--green-soft); color: var(--green); font-size: 13px; }
+    .bubble p { margin: 0 0 12px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble h1, .bubble h2, .bubble h3, .bubble h4 { margin: 4px 0 10px; font-family: Georgia, "Microsoft YaHei", serif; font-weight: 500; line-height: 1.35; }
+    .bubble h1 { font-size: 21px; }
+    .bubble h2 { font-size: 18px; }
+    .bubble h3, .bubble h4 { font-size: 16px; }
+    .bubble ul, .bubble ol { margin: 7px 0 12px; padding-left: 23px; }
+    .bubble li { padding-left: 2px; margin: 3px 0; }
+    .bubble a { color: var(--green); text-underline-offset: 2px; }
+    .bubble blockquote { margin: 9px 0; padding: 2px 0 2px 12px; border-left: 3px solid #c9d7cb; color: #596a62; }
+    .bubble code { padding: 2px 5px; border-radius: 5px; background: #edf0e9; font: .9em Consolas, monospace; }
+    .bubble pre { overflow-x: auto; margin: 10px 0; padding: 12px; border-radius: 10px; background: #eef0ea; }
+    .bubble pre code { padding: 0; background: transparent; }
+    .bubble hr { border: 0; border-top: 1px solid var(--line); }
     .bubble { max-width: min(82%, 650px); padding: 13px 16px; border: 1px solid var(--line); border-radius: 4px 15px 15px 15px; background: var(--panel); font-size: 14px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
     .user .bubble { border: 0; border-radius: 15px 4px 15px 15px; color: white; background: var(--green); }
     .bubble.pending:after { content: ""; display: inline-block; width: 6px; height: 15px; margin-left: 3px; vertical-align: -2px; background: #85a798; animation: blink 1s steps(2) infinite; }
@@ -94,7 +108,7 @@
 <body>
   <div class="app">
     <aside>
-      <div class="brand"><span class="brand-mark">＋</span><span>OpenClaw Care</span></div>
+      <div class="brand"><span class="brand-mark">＋</span><span>DeepAgents Care</span></div>
       <section>
         <div class="side-label">当前会话</div>
         <div class="session-card" style="margin-top:12px">

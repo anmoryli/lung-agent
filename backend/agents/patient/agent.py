@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from functools import cached_property
 from typing import Any, Callable
@@ -19,16 +20,18 @@ from backend.runtime.async_runner import run_async
 
 
 PATIENT_PROMPT = """
-你是肺癌患者服务的主 Agent，Gateway 会把患者请求交给你。先判断患者现在的目标，再决定自己回答还是交给一个最合适的专科助手。
+你是基于 DeepAgents 的肺癌患者服务助手。先判断患者现在要办什么，再决定直接回答还是交给一个最合适的专科助手。
 
 工作顺序：
-1. 识别目标：症状安全、报告、检查或预约、问诊准备、心理支持、医保费用、交通陪同、上门护理。打招呼或一般问题直接回答。
+1. 打招呼时简短回应，不罗列功能清单，也不主动输出与当前问题无关的急症提醒。识别目标后只处理患者当前要办的事。
 2. 需要病历事实时，只让专科助手查当前合成患者的资料。资料里没有的内容就说暂时查不到。
-3. 缺少关键信息时，每轮最多问两个问题。一次只委派一个专科助手，不让子助手互相委派。
-4. 任何写入、预约、申请或同步前，先把具体内容和影响告诉患者并取得明确同意。写工具还会暂停等待确认；没有确认就不执行。
-5. 输出简短、易懂的当前结论和下一步。医疗判断由医生确认；不诊断、不建议停换药、不决定检查必要性，不承诺资格、费用或服务可用。
+3. 先用病历、当前会话和已有信息补齐上下文，不让患者重复提供系统已有的信息。确实缺少阻塞下一步的内容时，每轮只问一个最关键的问题；能用安全默认值继续时就直接继续，不连环追问。
+4. 如果患者只泛称“挂号/预约”，而资料里已有未来的同类已确认预约，就只告知最近一条预约的科室、时间和状态，然后结束回复；不要追问是否要新挂、不要索要更多字段。患者要新增预约会继续提出。
+5. 一次只委派一个专科助手，不让子助手互相委派。预约请求只回答相关预约，别把同日检查、护理或其他无关安排一并列出。
+6. 写入工具会弹出一次确认。先用一句话说明将提交的内容，再调用写入工具等待确认；不要在工具确认前另行追问一次口头同意。预约申请的状态是“待医院确认”，不能说成已挂号成功。
+7. 输出简短、易懂的当前结论和下一步。医疗判断由医生确认；不诊断、不建议停换药、不决定检查必要性，不承诺资格、费用或服务可用。
 
-严重呼吸困难、胸痛、咯血、高热寒战、严重腹泻或自伤想法出现时，优先建议立即联系当地急救或就近急诊。不要把高风险情况说成在家观察即可，也不要输出内部风险标签、工具名、Agent 名或推理过程。
+患者提到严重呼吸困难、胸痛、咯血、高热寒战、严重腹泻或自伤想法时，优先建议立即联系当地急救或就近急诊。不要把高风险情况说成在家观察即可，也不要输出内部风险标签、工具名、Agent 名或推理过程。
 
 默认从当前患者自己的对话归档中按语义召回相关内容，并归档新的对话。只允许在同一合成患者编号下检索；患者明确要求不再保存时停止归档并清除该患者的向量记忆。
 
@@ -78,6 +81,61 @@ class PatientMainAgent(RoleMainAgent):
                 position = message.find(term, position + len(term))
         return False
 
+    @staticmethod
+    def _is_generic_booking_request(message: str) -> bool:
+        """泛泛说要挂号时先查是否已经有号，避免把患者带进重复预约流程。"""
+        text = re.sub(r"\s+", "", message)
+        if any(term in text for term in ("取消", "改期", "改约", "新挂", "再挂", "另外挂", "查询预约")):
+            return False
+        return any(term in text for term in ("帮我挂个号", "帮我挂号", "帮我预约挂号", "能不能帮我挂个号", "可以帮我挂个号"))
+
+    @staticmethod
+    def _existing_clinic_appointment(tool_result: Any) -> str | None:
+        """从 MCP 搜索结果里挑最近一条未来肿瘤复诊号，忽略护理随访等无关预约。"""
+        bundles = []
+        if isinstance(tool_result, dict):
+            bundles.append(tool_result)
+        elif isinstance(tool_result, list):
+            for item in tool_result:
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    try:
+                        bundles.append(json.loads(item["text"]))
+                    except json.JSONDecodeError:
+                        continue
+
+        now = datetime.now(timezone.utc)
+        matches = []
+        for bundle in bundles:
+            for entry in bundle.get("entry", []):
+                resource = entry.get("resource", {})
+                if resource.get("status") != "booked":
+                    continue
+                service_names = [
+                    value
+                    for service in resource.get("serviceType", [])
+                    for value in [service.get("text", ""), *(coding.get("display", "") for coding in service.get("coding", []))]
+                    if value
+                ]
+                service_name = "、".join(dict.fromkeys(service_names))
+                if not any(term in service_name for term in ("肿瘤", "复诊")):
+                    continue
+                try:
+                    start = datetime.fromisoformat(resource["start"].replace("Z", "+00:00"))
+                    end = datetime.fromisoformat(resource["end"].replace("Z", "+00:00"))
+                except (KeyError, ValueError):
+                    continue
+                if start >= now:
+                    matches.append((start, end, service_name))
+
+        if not matches:
+            return None
+        start, end, service_name = min(matches, key=lambda item: item[0])
+        weekdays = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+        return (
+            f"您已有一条{service_name}预约：{start.month}月{start.day}日（{weekdays[start.weekday()]}）"
+            f"{start:%H:%M}–{end:%H:%M}，状态为已确认。"
+        )
+
     async def _invoke_patient(
         self,
         message: str,
@@ -104,9 +162,13 @@ class PatientMainAgent(RoleMainAgent):
             create_deep_agent,
             register_harness_profile,
         )
+        from langchain.chat_models import init_chat_model
         from langchain.mcp import MCPAdapter
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
         from langgraph.types import Command
+
+        # DeepAgents 继续负责编排；只有 SSE 请求显式打开 LangChain 模型流式输出。
+        streaming_model = init_chat_model(model, streaming=True) if on_delta is not None else model
 
         # 非患者角色仍然不带 task 工具；只有这里显式配置子 Agent 的图会启用委派。
         register_harness_profile(
@@ -127,13 +189,26 @@ class PatientMainAgent(RoleMainAgent):
 
         async with MCPAdapter(mcp_transport()) as adapter:
             available = {item.name: item for item in await adapter.list_tools()}
+            if self._is_generic_booking_request(message):
+                appointment_tool = available.get("search_appointments")
+                if appointment_tool is not None:
+                    result = await appointment_tool.ainvoke({"patient_id": patient_id})
+                    existing_appointment = self._existing_clinic_appointment(result)
+                    if existing_appointment:
+                        if memory_enabled:
+                            await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "user", message)
+                            await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", existing_appointment)
+                        if on_delta is not None:
+                            on_delta(existing_appointment)
+                        return existing_appointment
+
             registry = PatientAgentRegistry()
             subagents = registry.deepagent_specs(available, patient_id, task_key)
             tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
             async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
                 await checkpointer.setup()
                 graph = create_deep_agent(
-                    model=model,
+                    model=streaming_model,
                     tools=tools,
                     system_prompt=self._prompt_with_context(recalled),
                     subagents=subagents,
@@ -193,9 +268,10 @@ class PatientMainAgent(RoleMainAgent):
                     streamed_text = False
                     async for event in graph.astream_events(request_state, config=config, version="v2"):
                         metadata = event.get("metadata", {})
+                        namespace = metadata.get("langgraph_checkpoint_ns", "")
                         if (
                             event.get("event") == "on_chat_model_stream"
-                            and not metadata.get("langgraph_checkpoint_ns", "")
+                            and (not namespace or "|" not in namespace)
                         ):
                             chunk = event.get("data", {}).get("chunk")
                             content = getattr(chunk, "content", "")

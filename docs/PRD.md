@@ -1,10 +1,10 @@
-# OpenClaw 肺癌全程管理标准 PRD
+# DeepAgents 肺癌全程管理标准 PRD
 
 版本：V1.7.1
 
 日期：2026-09-02
 
-来源基线：docs/product-source-baseline.json#openclaw-care-2026.7.2@2026-08-28
+来源基线：docs/product-source-baseline.json#deepagents-care-2026.7.2@2026-08-28
 冻结源 PRD：PRD-merged-v1.5-frozen.md V1.5，SHA-256：a2d1f83f5722c6c5d50701b8841b46dae1b6bce75d6023af965fbdec67376662
 派生关系：本 PRD 是冻结 V1.5 源规则、已确认 RC-P1 增量、2026-08-29 报告中心结果/授权分流裁决及 2026-09-02 报告 case 生命周期/授权服务故障关闭澄清派生的 V1.7.1 产品规则合同。
 PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前输入查阅。
@@ -13,7 +13,7 @@ PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前�
 
 ## 0. 合并口径
 
-本版本的当前产品输入是冻结源目录 `open claw care-2026.7.2` 中的根 `PRD-merged-v1.5-frozen.md` V1.5；其文件身份、路径白名单和 SHA-256 由 `docs/product-source-baseline.json` 固化并只读校验。V1.7.1 只在该源规则之上纳入已确认的 `RC-P1-001..012` 报告中心增量、既有冲突裁决、2026-08-29 结果/授权分流裁决及 2026-09-02 生命周期/关闭澄清。附录 A 保留 PRD-A/PRD-B 的历史合并痕迹，但二者不属于本轮输入、规则锚点或当前执行口径。
+本版本的当前产品输入是冻结源目录 `deepagents care-2026.7.2` 中的根 `PRD-merged-v1.5-frozen.md` V1.5；其文件身份、路径白名单和 SHA-256 由 `docs/product-source-baseline.json` 固化并只读校验。V1.7.1 只在该源规则之上纳入已确认的 `RC-P1-001..012` 报告中心增量、既有冲突裁决、2026-08-29 结果/授权分流裁决及 2026-09-02 生命周期/关闭澄清。附录 A 保留 PRD-A/PRD-B 的历史合并痕迹，但二者不属于本轮输入、规则锚点或当前执行口径。
 
 关键收口原则：
 
@@ -27,7 +27,7 @@ PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前�
 8. Schedule Orchestrator 调度编排层不是“定时提醒工具”，而是在正确时间把正确事项投影给正确责任人；候选动作必须先过安全、隐私、频率和角色落点判断。
 9. 简单任务与复杂任务交互分流标准适用于患者端、医生端、管理端和领导看板：简单任务优先在抽屉或弹层中完成，复杂任务才进入独立页面。
 10. PRD、原型、规则追踪与测试资产必须按各自职责同步维护：产品口径变化先更新 PRD；原型行为变化同步写入 `index.html`；`docs/report-center-phase1-rule-traceability.json` 只映射真实存在的分层实现与证据；关键闭环必须补充回归测试或点击测试记录。
-11. 上门护理按独立 `home_care` 业务域嵌入 OpenClaw：患者端、护理端、医生端、管理端协同；服务上下线、服务类别和模板配置由管理端人工维护，不作为安全门约束；护理执行必须保留现场安全暂停、异常转诊、退款/权益退回、护理记录、教回法、随访、投诉和质控审计闭环。
+11. 上门护理按独立 `home_care` 业务域嵌入 DeepAgents：患者端、护理端、医生端、管理端协同；服务上下线、服务类别和模板配置由管理端人工维护，不作为安全门约束；护理执行必须保留现场安全暂停、异常转诊、退款/权益退回、护理记录、教回法、随访、投诉和质控审计闭环。
 12. 服务闭环单（ServiceCase）是跨角色、跨系统、跨任务的统一闭环抽象；患者、医生、管理端看到的是同一服务闭环单的角色投影，不能各自形成割裂事实。
 13. 新功能和迭代必须从双边使用者的真实目标倒推：先定义需求发起方最终想解决的问题、信任条件和下一步，再定义业务承接方为安全、高效完成判断或服务所需的上下文、证据、工具和关闭条件；“已展示页面、已发送资料、已创建任务、已标记完成”本身不代表问题已经解决。
 
@@ -58,7 +58,7 @@ PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前�
 | 报告中心 | 患者从“找报告/补资料、看懂报告、请医生看、确认存在或系统提示异常时请服务团队处理”四条真实目的进入；Gateway 只补缺失项。单独、无冲突的 `not_found` 是正常终态；授权阻断是权限状态；RC-P1-009 所列明确来源异常及 RC-P1-003 所列授权服务自身故障才自动进入唯一管理 `ServiceCase`，无需患者判断技术异常。 | Figma `RC-DB-20260829` 定义已批准目标设计；旧模块 170/171 只保留为 `superseded_unapproved_prototype` 历史技术证据。PRD 不记录易变执行状态；当前实现与证据看追踪矩阵，执行顺序看中文实施计划，当前状态与下一步看 handoff/测试报告。 | 治理回归验证 PRD、设计、追踪、计划与 handoff 职责一致；旧 G0-R 测试只能证明旧候选零写、布局和自身断言执行，不能证明当前产品逻辑正确。 | 报告中心仍需按批准设计完成患者 Journey、Task 5 真实管理核验与关闭动作、同一卡/Gateway 送达；生产集成仍需接 LIS/PACS/病理/基因、身份授权、消息和真实任务系统。 |
 | 症状补充 | 症状记录应以患者低负担方式完成，点选优先，支持文字/语音/图片辅助；不是所有症状都自动生成医生任务。 | 症状补充、治疗后观察记录、问诊中症状补充已有不同入口，避免直接跳回通用 Gateway；问诊前症状补充页已压缩为“一句话”输入，引导患者说清什么时候开始、哪里不舒服、多严重、做过什么处理和现在想问医生什么。 | 浏览器反馈修复“点不了”和“体温次数不清晰”问题。 | 症状分流需接 Safety Governor；高危组合进入人工/医生待办，普通记录写 Memory/Audit。 |
 | 医生待办中心 | 所有医生需要处理的事项统一置顶，可折叠；待办必须可打开、可处理、可关闭。 | 医生端顶部待办中心支持数量、收起、任务卡和问诊消息同步；医生点击“点击处理”按任务来源进入医生端处理面板，不得打开患者端问诊前准备弹窗。 | 多轮点击反馈修复了“任务躺在那里无法操作”和医生待办误入患者准备页的问题。 | 正式版需统一 Doctor Task Service，避免每个模块各自生成不可闭环的卡片。 |
-| 上门护理 `home_care` | 独立业务域，不并入其他服务。患者端经 Gateway/chat 发起需求，确认系统理解后才创建 `HomeCareApplication`；护理端、医生端、管理端按状态机投影同一申请。三道安全门分别处理急症/负面清单、服务目录/医嘱/资料/风险/资质、护士预评估/医生审核/上门前复核/现场安全暂停；服务上下线和类别由管理端配置，不作为安全门约束。 | HC-P2 mock 已完成：服务模板中心、患者资料清单/项目同意、护理端预评估/复核/签到/现场安全暂停/护理记录/材料/教回法/异常上报、医生审核/现场异常响应、管理端配置/排班/退款权益/投诉/质控/AI 审计、护理记录更正、随访、转诊关闭、`OpenClawHomeCareApiAdapter`、生产化 adapter 合同、确认前事实源快照、患者/护理端消费层和多来源触发三段式 mock API。 | 详见 `docs/test-report-current.md` 第 91-124 节、`docs/home-care-architecture-closure-map-20260730.md`、`docs/home-care-p2-real-service-template-and-interface-plan-20260731.md`、`docs/home-care-production-adapter-boundary-20260731.md`；HC-P2、事实源、多来源触发和 C-lite 领域切片回归已通过。 | 真实接口、权限认证、电子签名、真实文件短链、真实医嘱/病历、真实支付/权益、真实排班、真实投诉/质控系统、完整模板编辑发布流和护理文书导出仍需生产化。 |
+| 上门护理 `home_care` | 独立业务域，不并入其他服务。患者端经 Gateway/chat 发起需求，确认系统理解后才创建 `HomeCareApplication`；护理端、医生端、管理端按状态机投影同一申请。三道安全门分别处理急症/负面清单、服务目录/医嘱/资料/风险/资质、护士预评估/医生审核/上门前复核/现场安全暂停；服务上下线和类别由管理端配置，不作为安全门约束。 | HC-P2 mock 已完成：服务模板中心、患者资料清单/项目同意、护理端预评估/复核/签到/现场安全暂停/护理记录/材料/教回法/异常上报、医生审核/现场异常响应、管理端配置/排班/退款权益/投诉/质控/AI 审计、护理记录更正、随访、转诊关闭、`DeepAgentsHomeCareApiAdapter`、生产化 adapter 合同、确认前事实源快照、患者/护理端消费层和多来源触发三段式 mock API。 | 详见 `docs/test-report-current.md` 第 91-124 节、`docs/home-care-architecture-closure-map-20260730.md`、`docs/home-care-p2-real-service-template-and-interface-plan-20260731.md`、`docs/home-care-production-adapter-boundary-20260731.md`；HC-P2、事实源、多来源触发和 C-lite 领域切片回归已通过。 | 真实接口、权限认证、电子签名、真实文件短链、真实医嘱/病历、真实支付/权益、真实排班、真实投诉/质控系统、完整模板编辑发布流和护理文书导出仍需生产化。 |
 | 管理端任务池 | 管理端处理服务、接口失败、复查准备核对、交通停车、支付/退款、SLA 等非医疗事项；需要医生判断时才升级。 | 管理端服务任务池和复查准备任务已显示，并支持基础动作。 | V3 修复：复查准备已读不建任务，患者提出到院安排或复诊影响需求后管理端可见。 | 正式版需管理端 Task Center、SLA、转派、备注、补问、闭环原因和审计日志。 |
 | Schedule Orchestrator | 调度先生成候选，不等于患者推送或任务副作用；同一 `taskKey + scheduleKey` 幂等；本周期照护候选使用 `patientId + cycleWindowKey + scheduleKey` 幂等，检查前后助手候选使用 `patientId + examWindowKey + scheduleKey + phase` 幂等。 | 原型包含 schedule_rule、schedule_instance、schedule_run、notification_candidate、cycle_observation_candidate、patient_observation_record、exam_preparation_candidate、exam_result_candidate、exam_patient_action_record、候选落点说明、患者触达/已读/关闭/降频字段和稳定审计 key。 | `schedule-orchestrator-regression.js` 覆盖关键文案、cycle-care 幂等、检查前后助手候选、患者触达/已读/关闭审计和医生/管理端边界。 | 后端需独立调度服务，扫描 patient_state、tasks、orders、reports、appointments、behavior_events、memory_records，并把候选、触达、已读/关闭、患者保存记录、检查结果查看和问医生解释请求写入真实 `task_event/audit_log`。 |
 | 隐私与低焦虑 | 患者端默认只显示行动摘要，不展示风险分数、病名分期、模型推理链；“仅显示摘要”只收起当前功能详情，不清空整个对话。 | 已修复隐私模式误隐藏整个 chat 的问题，改为摘要/详情切换。 | 浏览器反馈确认原逻辑不合理后已调整。 | 正式版需有患者级隐私偏好、夜间免打扰、家属低敏同步开关。 |
@@ -66,7 +66,7 @@ PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前�
 
 ### 0.2.2 后续迭代分层
 
-本节的 `Platform P0-P4` 仅指 OpenClaw 平台生产化阶段，不等同于 `home_care` 领域阶段 `HC-P0/HC-P1/HC-P2`，也不等同于服务闭环单（ServiceCase）/AI 合同覆盖阶段。
+本节的 `Platform P0-P4` 仅指 DeepAgents 平台生产化阶段，不等同于 `home_care` 领域阶段 `HC-P0/HC-P1/HC-P2`，也不等同于服务闭环单（ServiceCase）/AI 合同覆盖阶段。
 
 | 层级 | 迭代目标 | 主要内容 | 不做/边界 |
 | --- | --- | --- | --- |
@@ -91,7 +91,7 @@ PRD-A/PRD-B 仅保留为附录 A 的排除历史追溯，本轮未作为当前�
 
 肺癌患者在治疗后院外阶段会持续遇到症状不适、报告查看、复查检查检验、医嘱执行、线上/线下问诊、交通停车、心理支持、陪同护理、费用医保和其他服务问题。传统患者端工具通常要求患者理解复杂菜单或自行判断流程，医生端又缺少结构化摘要、材料溯源和任务提醒，运营端也难以追踪服务闭环。
 
-OpenClaw 的核心机会是把患者自然语言、多模态资料、医生动作、医院接口、支付接口、第三方服务、运营处理和 Schedule Orchestrator 调度编排统一收口到 Gateway 和任务状态机中，让患者用一个入口表达需求，让医生和运营在各自权限内处理同一事实。Schedule Orchestrator 的核心价值是：患者不用自己记复杂流程，系统在正确时间把正确事项交给正确的人，并以低焦虑方式告诉患者下一步。
+DeepAgents 的核心机会是把患者自然语言、多模态资料、医生动作、医院接口、支付接口、第三方服务、运营处理和 Schedule Orchestrator 调度编排统一收口到 Gateway 和任务状态机中，让患者用一个入口表达需求，让医生和运营在各自权限内处理同一事实。Schedule Orchestrator 的核心价值是：患者不用自己记复杂流程，系统在正确时间把正确事项交给正确的人，并以低焦虑方式告诉患者下一步。
 
 ### 1.2 产品目标
 
@@ -106,7 +106,7 @@ OpenClaw 的核心机会是把患者自然语言、多模态资料、医生动�
 
 ### 1.2.1 功能设计基本原则：从双边真实目标倒推闭环
 
-OpenClaw 的功能设计不能从页面、按钮、模块或内部任务名称出发，也不能只优化单侧操作。每个功能和迭代都必须同时理解需求发起方与业务承接方的本质目标，并从双方各自的“下一步”和最终要解决的问题倒推流程、数据、权限、工具、状态与验收标准。
+DeepAgents 的功能设计不能从页面、按钮、模块或内部任务名称出发，也不能只优化单侧操作。每个功能和迭代都必须同时理解需求发起方与业务承接方的本质目标，并从双方各自的“下一步”和最终要解决的问题倒推流程、数据、权限、工具、状态与验收标准。
 
 在患者与医生协作场景中：患者通常不是为了“上传一份文件”或“生成一个医生任务”，而是希望找到专业匹配且可信任的人，解决对报告、症状、治疗或下一步安排的具体疑虑；医生也不是为了“阅读一张任务卡”，而是要在尽可能短的时间内，基于完整、可信、可追溯的患者上下文做出安全评估，明确不确定项，并给出可执行的下一步。该原则同样适用于患者与护士、管理人员、客服、医院系统或第三方服务之间的协作。
 
@@ -464,7 +464,7 @@ OpenClaw 的功能设计不能从页面、按钮、模块或内部任务名称�
 | --- | --- |
 | 功能名称 | 报告中心打开与查看 |
 | 所属模块 | 报告中心、患者端 H5 |
-| 需求来源 | 冻结来源基线 `openclaw-care-2026.7.2@2026-08-28` 的 `PRD-merged-v1.5-frozen.md#fr-005-报告中心打开与查看`；已确认 RC-P1 增量 |
+| 需求来源 | 冻结来源基线 `deepagents-care-2026.7.2@2026-08-28` 的 `PRD-merged-v1.5-frozen.md#fr-005-报告中心打开与查看`；已确认 RC-P1 增量 |
 | 用户角色 | 患者、家属 |
 | 使用场景 | 患者点击“查报告/传报告”或问“报告中心在哪里”，想查看已同步报告。 |
 | 功能说明 | 打开报告中心、单张查看、多选查看和“只查看，不生成任务”。 |
@@ -482,7 +482,7 @@ OpenClaw 的功能设计不能从页面、按钮、模块或内部任务名称�
 | --- | --- |
 | 功能名称 | 报告检索、上传与整理给医生 |
 | 所属模块 | 报告中心、Report Agent、HIS/LIS/PACS、医生端 |
-| 需求来源 | 冻结来源基线 `openclaw-care-2026.7.2@2026-08-28` 的 `PRD-merged-v1.5-frozen.md#fr-006-报告检索上传与整理给医生`；已确认 RC-P1 增量与冲突裁决 |
+| 需求来源 | 冻结来源基线 `deepagents-care-2026.7.2@2026-08-28` 的 `PRD-merged-v1.5-frozen.md#fr-006-报告检索上传与整理给医生`；已确认 RC-P1 增量与冲突裁决 |
 | 用户角色 | 患者、授权代理人、管理人员、医生 |
 | 使用场景 | 患者授权检索院内报告、上传外院/纸质报告，或选择报告整理给医生。 |
 | 功能说明 | 在可信身份与授权边界内检索院内报告；来源事实形成后，患者在同一张报告进度卡查看五类患者结果及下一步。产品按四条患者目的主线组织：找报告/补齐资料、看懂报告、请医生查看，以及患者有明确存在证据或系统已识别来源异常时请求服务处理。六种内部输入与五个检查点只属于 QA 验证，不作为患者学习或选择对象。外院/纸质报告仍走上传链；AI 解读和咨询医生均由患者分别明确确认。 |
@@ -562,7 +562,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 
 ### FR-006.1 AI 报告解读 Agent V1
 
-患者查看报告后，如果不理解原文结论、担心严重程度或不知道下一步，报告中心和检查结果回传卡先提供明确标识 AI 的患者动作；只有患者主动点击后，Gateway 才调用 `OpenClawReportInterpretationAgent` 生成患者可理解的 AI 报告解读。查看、报告回传或 Gateway 识别“看不懂”本身都不得自动调用模型，也不得直接升级为医生解释任务；Agent 返回结构化结果和下一步边界。
+患者查看报告后，如果不理解原文结论、担心严重程度或不知道下一步，报告中心和检查结果回传卡先提供明确标识 AI 的患者动作；只有患者主动点击后，Gateway 才调用 `DeepAgentsReportInterpretationAgent` 生成患者可理解的 AI 报告解读。查看、报告回传或 Gateway 识别“看不懂”本身都不得自动调用模型，也不得直接升级为医生解释任务；Agent 返回结构化结果和下一步边界。
 
 核心对象：
 
@@ -721,7 +721,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 | 权限要求 | 患者只看患者、医生、必要系统提示；医生可看 Agent 旁路建议和草稿；草稿发送前患者不可见。 |
 | 状态变化 | `waiting_doctor`、`active`、`response_timeout`、`continue_waiting`、`completed`、`doctor_closed`、`post_consult_active`、`soft_completed`。 |
 | 异常情况 | 医生未接单、医生 24 小时未接单释放占用、患者新高危症状、Agent 误发患者、消息不同步、重复接单事件不得重复扣次。 |
-| 验收标准 | 医生回复直接同步患者端；患者继续回复不触发 OpenClaw 自动回复；医生端结束问诊文案为“结束问诊”；医生未回复前患者端不出现“结束问诊”入口，不得生成问诊后服务；医生真实回复后患者端出现“沟通完，整理医生建议”，点击后生成且只生成一个 `postConsult` / `问诊后服务闭环`；问诊完成后“医生问诊/线上问诊”任务变为“已完成”，不继续显示权益占用；点击 `postConsult` 父任务打开问诊后服务工作台；点击“推荐放疗科医生”进入医生库推荐列表，患者端列表不展示病名分期、基因、当前用药方案、接口推荐理由或内部推理；点击“选择就诊时间”打开时间选择器，确认后只更新同一个 `postConsult:doctor_time` 医生/时间子任务，未选医生前在父任务摘要/工作台内显示“推荐放疗科医生并匹配时间”，选定具体医生和线上/线下方式后升级为“放疗科线上问诊/线下就诊”；医生/时间子任务不得和父任务并列显示为患者任务栏顶层卡片；父任务保持“推进中”并聚合子任务状态；在医生库列表选定具体医生后，“线上问诊”进入该医生线上问诊页面并绑定医生，“线下就诊”进入该医生线下就诊服务承接；材料需求生成独立“放疗科材料准备”任务，点击后进入材料准备工作台并可标记材料已补齐。 |
+| 验收标准 | 医生回复直接同步患者端；患者继续回复不触发 DeepAgents 自动回复；医生端结束问诊文案为“结束问诊”；医生未回复前患者端不出现“结束问诊”入口，不得生成问诊后服务；医生真实回复后患者端出现“沟通完，整理医生建议”，点击后生成且只生成一个 `postConsult` / `问诊后服务闭环`；问诊完成后“医生问诊/线上问诊”任务变为“已完成”，不继续显示权益占用；点击 `postConsult` 父任务打开问诊后服务工作台；点击“推荐放疗科医生”进入医生库推荐列表，患者端列表不展示病名分期、基因、当前用药方案、接口推荐理由或内部推理；点击“选择就诊时间”打开时间选择器，确认后只更新同一个 `postConsult:doctor_time` 医生/时间子任务，未选医生前在父任务摘要/工作台内显示“推荐放疗科医生并匹配时间”，选定具体医生和线上/线下方式后升级为“放疗科线上问诊/线下就诊”；医生/时间子任务不得和父任务并列显示为患者任务栏顶层卡片；父任务保持“推进中”并聚合子任务状态；在医生库列表选定具体医生后，“线上问诊”进入该医生线上问诊页面并绑定医生，“线下就诊”进入该医生线下就诊服务承接；材料需求生成独立“放疗科材料准备”任务，点击后进入材料准备工作台并可标记材料已补齐。 |
 
 #### 放疗科线下就诊服务承接补充规则（2026-07-16）
 
@@ -961,7 +961,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 
 ### FR-026.1 医保结算 Agent V1
 
-医保/报销/结算从“其他服务方向”升级为 Gateway 统一编排下的专职业务 Agent。Gateway 先对患者自然语言做多意图粗拆分，形成 `gateway_agent_route`，再调用 `OpenClawInsuranceAgent` 生成 `insurance_agent_result`；医保 Agent 只返回医保领域判断、下一步和 `requiredCapabilities`，不得直接组织医学或管理 Agent 协作。Gateway 负责统一调度医学事实确认、报告材料、管理端办理和任务状态机，并把所有结果收敛成患者可理解的“医保下一步”。
+医保/报销/结算从“其他服务方向”升级为 Gateway 统一编排下的专职业务 Agent。Gateway 先对患者自然语言做多意图粗拆分，形成 `gateway_agent_route`，再调用 `DeepAgentsInsuranceAgent` 生成 `insurance_agent_result`；医保 Agent 只返回医保领域判断、下一步和 `requiredCapabilities`，不得直接组织医学或管理 Agent 协作。Gateway 负责统一调度医学事实确认、报告材料、管理端办理和任务状态机，并把所有结果收敛成患者可理解的“医保下一步”。
 
 核心对象：
 
@@ -982,7 +982,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 
 1. 患者仍只面对 Gateway/chat，不展示 Agent 名称、内部调用、推理链、后台完整状态机或最终承诺比例。
 2. `primaryIntent = insurance` 时，Gateway 根据文本拆出 `secondaryIntents = medical_fact_confirmation | document_packet | admin_service | report_lookup | payment_or_billing`，多意图由 Gateway 直接调度多个 Agent 或任务能力。
-3. `OpenClawInsuranceAgent` 只负责医保领域判断：报销比例解释、报销形式、材料清单、材料卡点、办理进度；它可以返回 `requiredCapabilities`，但不能直接调用医学事实、报告材料或管理端 Agent。
+3. `DeepAgentsInsuranceAgent` 只负责医保领域判断：报销比例解释、报销形式、材料清单、材料卡点、办理进度；它可以返回 `requiredCapabilities`，但不能直接调用医学事实、报告材料或管理端 Agent。
 4. “居民医保能报多少”“新农合报销比例”只返回预计范围、通常规则和需核实下一步；只写 session/audit，不生成医生或管理任务。
 5. “省外异地购药怎么报”返回准备材料回参保地报销路径，可生成材料包草稿；“XX医院公众号直报要什么”返回公众号上传材料清单。
 6. “医保缺病情诊断书，需要写分期和一线治疗”由 Gateway 拆成医保 + 医学事实确认；患者确认前不生成医生任务，确认后只生成一条医生开具/医学事实确认任务。
@@ -1038,7 +1038,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 | 需求来源 | 用户新增机制，全量做机制但分阶段上线患者触达 |
 | 用户角色 | 患者、家属、医生、上门护士、运营、系统、产品/算法 |
 | 使用场景 | 患者治疗周期、轻随访、医嘱执行、检查前后、报告回传、问诊前后、交通停车、支付权益、家属协同、医生/管理 SLA、成长机制都需要系统在正确时间判断是否需要行动。 |
-| 功能说明 | 读取 `patient_state`、`tasks`、`task_events`、`doctor_orders`、`reports`、`exam_orders`、`appointments`、`payment_orders`、`transport_service_tasks`、`behavior_events`、`memory_records`，根据 `schedule_rule` 生成 `schedule_instance`、`schedule_run` 和 `notification_candidate`。其中个体化科普/照护推送预留 `OpenClawPersonalizedRiskModel` 接口：以患者全量数据集微调模型为主，训练样本包含不同时间发生的症状、处理方式和处理效果；推送内容生成依据包括当前治疗方式和治疗阶段、距离最近治疗/手术/化疗/免疫治疗的时间、既往副反应记录、最近症状和报告趋势、医生或服务包配置规则；相似患者权重作为微调模型训练特征和经验来源；GraphRAG 只负责校验科普、记录建议和照护提示是否落在指南/共识边界内。 |
+| 功能说明 | 读取 `patient_state`、`tasks`、`task_events`、`doctor_orders`、`reports`、`exam_orders`、`appointments`、`payment_orders`、`transport_service_tasks`、`behavior_events`、`memory_records`，根据 `schedule_rule` 生成 `schedule_instance`、`schedule_run` 和 `notification_candidate`。其中个体化科普/照护推送预留 `DeepAgentsPersonalizedRiskModel` 接口：以患者全量数据集微调模型为主，训练样本包含不同时间发生的症状、处理方式和处理效果；推送内容生成依据包括当前治疗方式和治疗阶段、距离最近治疗/手术/化疗/免疫治疗的时间、既往副反应记录、最近症状和报告趋势、医生或服务包配置规则；相似患者权重作为微调模型训练特征和经验来源；GraphRAG 只负责校验科普、记录建议和照护提示是否落在指南/共识边界内。 |
 | 业务规则 | 调度扫描只生成候选动作、扫描记录、审计记录和必要的行为/成长记录，不能把候选直接写成医生待办或管理端任务；只有医生确认、管理端接单、接口回传、支付完成或患者明确提交等确认节点，才可把候选提升为医生待办或管理端任务。调度器不能自行决定扣减、释放、退款；但可按已确认业务规则生成扣次/释放候选，由权益服务、接口回传或管理端确认执行，例如服务包问诊 24 小时未接单释放占用、交通/陪同服务完成 24 小时后扣次。调度器不能生成医嘱、不能改变医疗判断、不能把内部风险分数直接暴露给患者。所有调度必须幂等，同一业务使用稳定 `taskKey + scheduleKey`，重复扫描不重复通知、不重复扣费、不重复建任务。个体化科普/照护推送不能生成医疗任务，参考信息不进入医生待办，不进入管理端 SLA；运营/管理端人工推送只限低敏科普、流程提醒、材料准备和记录建议，医生人工推送可包含个体化医学解释或处理建议，但必须作为医生确认动作写入 `task_event` 和 `audit_log`。 |
 | 页面/交互要求 | 患者端优先进入“今日照护卡”或 Gateway，默认展示行动、科普和安心解释，不展示风险分数、病名分期、模型推理链和后台状态机；患者端不展示模型概率、相似患者结论或 GraphRAG 证据链；公共场合可开启隐私模式，只显示低敏摘要。医生端和管理端只看到与本角色需要处理的调度来源、候选原因、SLA 和审计；个体化科普/照护推送除外，患者主动发起问医生且问题命中治疗周期相关内容时，医生端仅显示 Doctor Assist Context 参考卡。 |
 | 字段要求 | `scheduleKey`、`taskKey`、`ruleType`、`sourceTables`、`triggerWindow`、`candidateKey`、`landing`、`patientTouch`、`priority`、`frequencyPolicy`、`privacyLevel`、`auditRefs`、`dedupeStatus`。 |
@@ -1115,7 +1115,7 @@ Task 7 的入口分工：`index.html?role=review&review=report-center` 承接当
 
 生活照护边界补充：生活照护与医疗护理的边界需要接入独立护工服务域。该模块待 `home_care` 完成后单独开发，可复用低认知入口、Gateway 意图识别、候选生成、授权、任务投影、审计和闭环逻辑；当前 `home_care` 只识别、提示和转接生活照护需求，不把其并入医疗护理申请。
 
-生产化 adapter 边界补充：`OpenClawHomeCareProductionAdapters` 已作为 `home_care` 的真实系统接入合同边界落地，覆盖患者身份、临床医嘱、电子病历、服务包权益、支付/退款、排班、定位签到、电子签名、文件/图片/短链、消息通知、投诉/质控和模板编辑发布 12 个接入域。当前模式为 `mock_contract`，`adapter_ready_for_production_traffic=false`，只允许写入 `HomeCareIntegrationEvent` 作为集成探测和审计证据；不得通过 adapter 直接创建申请、订单、护士任务、医生任务、管理任务、支付、退款、权益锁定或扣次。真实 provider 接入后，所有业务事实仍必须由 `home_care` 领域状态机或服务端等价状态机推进。
+生产化 adapter 边界补充：`DeepAgentsHomeCareProductionAdapters` 已作为 `home_care` 的真实系统接入合同边界落地，覆盖患者身份、临床医嘱、电子病历、服务包权益、支付/退款、排班、定位签到、电子签名、文件/图片/短链、消息通知、投诉/质控和模板编辑发布 12 个接入域。当前模式为 `mock_contract`，`adapter_ready_for_production_traffic=false`，只允许写入 `HomeCareIntegrationEvent` 作为集成探测和审计证据；不得通过 adapter 直接创建申请、订单、护士任务、医生任务、管理任务、支付、退款、权益锁定或扣次。真实 provider 接入后，所有业务事实仍必须由 `home_care` 领域状态机或服务端等价状态机推进。
 
 事实源接入切片 1 补充：`readFactSourceSnapshot()` 和 `prepareFactSourceSnapshot()` 已形成只读事实源快照合同。Gateway 或服务端在患者确认前，可把患者身份/家属授权、医嘱/处方、病历/出院/置管记录、图片证据和服务模板资料要求汇总为 `HomeCareFactSourceSnapshot`，用于生成“我理解为...”澄清语句、缺项列表和下一步路由。该快照只写事实源证据、集成事件和审计，不创建 `HomeCareApplication`、订单、护士任务、医生任务、管理任务、支付或权益变更。打针无医嘱等场景应在快照阶段识别为缺 `有效医嘱/处方`、`药品信息`、`过敏史`，回到患者澄清/补资料，而不是直接进入医生待办或支付。
 
@@ -1167,14 +1167,14 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 所属模块 | Patient360、Enrollment、Screening Candidate、Consent Center、Baseline Assessment、Service Catalog、Service Package、Service Contract、Service Entitlement、Gateway Context Loader、Management Console |
 | 需求来源 | Word P05、P06、O01、O08、PN-03；依赖 FR-029 患者事实底座和 FR-030 组织权限/授权底座 |
 | 用户角色 | 患者、家属、医生、护士、管理端、运营负责人、医院领导、系统 |
-| 使用场景 | 系统需要把 Word 中“连续健康档案、患者 360、画像、分层、建档、筛查、纳管、知情同意、服务包、签约、服务中、续约/取消、个体化管理服务”转成 OpenClaw 的可运营生命周期：先形成可信患者事实和可见投影，再生成入组候选或签约意向，经患者/授权人确认和管理端核对后成为服务合同，后续服务闭环、权益占用/扣次、路径/随访和经营指标都关联同一生命周期对象。 |
-| 功能说明 | `Patient360` 是基于 `PatientMaster`、`DataSourceRecord`、`MemoryRecord`、`Task`、服务闭环单（ServiceCase）和领域履约对象生成的角色化全景视图，不是新的患者端菜单。`EnrollmentCandidate` 承接目标患者筛查、医生/管理端推荐、HIS 已购买服务包、患者主动咨询和跨层级纳管建议；确认前只表示候选。`Enrollment` 表示患者进入某个 OpenClaw 管理项目或病种服务范围。`ConsentRecord` 承接入组/签约知情同意、报告检索、家属协同和数据使用授权。`BaselineAssessment` 承接入组初始评估、管理目标和可人工复核的 AI 结构化画像。`ServiceCatalog` 和 `ServicePackage` 承接 Word 的服务目录、服务包名称/版本/病种/价格/期限/简介/发布科室/居民端可见范围。`ServiceContract` 表示患者与服务包的正式签约/续约/取消/到期记录。`ServicePackageEntitlement` 继续作为权益次数和占用/扣次台账，不再被误当成完整服务包生命周期。 |
+| 使用场景 | 系统需要把 Word 中“连续健康档案、患者 360、画像、分层、建档、筛查、纳管、知情同意、服务包、签约、服务中、续约/取消、个体化管理服务”转成 DeepAgents 的可运营生命周期：先形成可信患者事实和可见投影，再生成入组候选或签约意向，经患者/授权人确认和管理端核对后成为服务合同，后续服务闭环、权益占用/扣次、路径/随访和经营指标都关联同一生命周期对象。 |
+| 功能说明 | `Patient360` 是基于 `PatientMaster`、`DataSourceRecord`、`MemoryRecord`、`Task`、服务闭环单（ServiceCase）和领域履约对象生成的角色化全景视图，不是新的患者端菜单。`EnrollmentCandidate` 承接目标患者筛查、医生/管理端推荐、HIS 已购买服务包、患者主动咨询和跨层级纳管建议；确认前只表示候选。`Enrollment` 表示患者进入某个 DeepAgents 管理项目或病种服务范围。`ConsentRecord` 承接入组/签约知情同意、报告检索、家属协同和数据使用授权。`BaselineAssessment` 承接入组初始评估、管理目标和可人工复核的 AI 结构化画像。`ServiceCatalog` 和 `ServicePackage` 承接 Word 的服务目录、服务包名称/版本/病种/价格/期限/简介/发布科室/居民端可见范围。`ServiceContract` 表示患者与服务包的正式签约/续约/取消/到期记录。`ServicePackageEntitlement` 继续作为权益次数和占用/扣次台账，不再被误当成完整服务包生命周期。 |
 | 业务规则 | 自动建档、手工建档和批量导入都只能生成 `PatientMaster`/`Patient360` 的事实或候选，不自动完成入组、签约或扣费。目标患者筛查、风险分层、人群标签和跨层级纳管建议只生成 `EnrollmentCandidate`，必须经医生/管理端复核或患者确认后才能进入 `Enrollment`。服务包配置发布不等于患者已签约；签约意向不等于服务中；HIS 已购买服务包需经身份匹配、授权和服务范围核对后再生成 `ServiceContract`。服务包权益占用、扣次、释放、退款仍沿用各领域确认节点：医生首次业务操作、服务完成回传、支付/权益系统、管理端确认或第三方回调，不得由路径、画像、分层或前端按钮直接改变。续约、取消、到期和退出必须有原因、状态、患者可见结果和审计。患者端只展示已签约服务能帮他做什么、当前还剩什么、下一步谁处理，不展示内部筛查模型、风险颜色、合同字段或运营评分。 |
 | 页面/交互要求 | 患者端仍 Gateway-first：当患者问“我有没有服务包”“我能享受什么服务”“怎么加入/续费/取消”时，Gateway 读取签约/权益投影并给出低负担下一步；未签约时可生成签约意向或引导联系服务团队，但确认前不创建正式服务合同。医生端 Patient360 只展示当前诊疗/问诊相关的病程摘要、报告、服务关系、未完成事项和可复核画像，不展示运营合同细节。管理端提供患者 360/入组签约工作台：患者检索、候选筛查、建档补全、知情同意核对、基线评估、签约意向、合同状态、服务包版本、到期/续约/取消、权益台账和服务履约记录。领导看板只看服务目录、签约人数、服务中人数、到期人数、续约率、服务完成率和满意度等汇总指标，不处理个体签约。 |
 | 字段要求 | `patientMasterId`、`patient360SnapshotId`、`patientStatus`、`careStage`、`cohortTags`、`riskStratificationId`、`screeningCandidateId`、`enrollmentCandidateId`、`enrollmentId`、`enrollmentSource`、`enrollmentStatus`、`baselineAssessmentId`、`managementGoalId`、`consentRecordId`、`serviceCatalogId`、`servicePackageId`、`packageVersion`、`serviceContractId`、`contractStatus`、`contractTermStart`、`contractTermEnd`、`servicePackageEntitlementId`、`renewalRef`、`cancelReason`、`exitReason`、`auditRefs`。 |
 | 权限要求 | 患者和授权家属只看本人服务状态、授权范围、权益摘要和可执行下一步；医生只看服务关系和当前医疗/问诊必要信息；管理端按签约、入组、服务履约最小必要查看合同、同意书和权益明细；运营负责人看队列、到期、续约、完成率和异常；领导看汇总脱敏指标；服务包价格、合同和权益变更必须由权限服务判定并审计。 |
 | 状态变化 | `profile_created`、`profile_quality_issue`、`candidate_detected`、`candidate_review_pending`、`candidate_rejected`、`enrollment_intent`、`consent_pending`、`consent_granted`、`baseline_pending`、`baseline_completed`、`service_package_selected`、`contract_pending`、`contract_active`、`service_active`、`renewal_pending`、`renewed`、`cancel_pending`、`cancelled`、`expired`、`service_ended`、`exited`。 |
-| 异常情况 | 患者身份未匹配、同一患者重复建档、候选患者不符合病种/项目范围、同意书缺失或撤回、HIS 已购买服务包但 OpenClaw 未匹配、服务包版本下线、合同期限冲突、权益剩余次数与合同不一致、患者拒绝入组、医生/管理端复核不通过、取消/续约原因缺失、跨机构纳管责任不清。 |
+| 异常情况 | 患者身份未匹配、同一患者重复建档、候选患者不符合病种/项目范围、同意书缺失或撤回、HIS 已购买服务包但 DeepAgents 未匹配、服务包版本下线、合同期限冲突、权益剩余次数与合同不一致、患者拒绝入组、医生/管理端复核不通过、取消/续约原因缺失、跨机构纳管责任不清。 |
 | 验收标准 | Word P05 的患者列表、连续健康档案、画像复核、患者 360、分层/标签和派发能力被收敛到 `Patient360`、候选、标签、风险分层和责任关系；Word P06 的建档、筛查、知情同意、基线评估、服务包、签约、服务中、续约/取消被收敛到 `EnrollmentCandidate`、`Enrollment`、`ConsentRecord`、`BaselineAssessment`、`ServicePackage` 和 `ServiceContract`；O01/O08 的服务目录和精细化增值服务通过 `ServiceCatalog/ServicePackage` 配置，不改变当前肺癌主线定位；签约前不生成服务中任务、不扣权益、不承诺服务履约；签约/续约/取消/到期/退出都有患者可见结果、管理端处理记录和审计；现有问诊、交通、home_care 等局部权益占用/扣次仍按各自确认节点执行，并可追溯到同一个 `ServiceContract`；重复候选、重复签约、重复续约和重复导入不会产生重复合同、重复权益或重复患者主档。 |
 
 ### FR-032 可配置专病路径、随访计划与患者低负担执行
@@ -1293,7 +1293,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 所属模块 | Research Cohort、Research Data Governance、De-identification Export、Model Registry、Model Training/Validation、Clinical Document AI Governance、Algorithm Compliance、Audit |
 | 需求来源 | Word P18、P17、PN-10；承接 P02 专题数据库和数据治理、FR-024 GraphRAG 与证据底座、FR-025 Agent/AI 输出合同、FR-026 评估审计、FR-029 数据接入治理、FR-030 权限审计、FR-037 指标快照；P17 中路径执行/随访/转诊/咨询等业务动作仍归 FR-032/033/036/014，不在本 FR 重复定义 |
 | 用户角色 | 临床研究负责人、研究员、数据治理人员、算法工程师、医生、质控/伦理管理员、系统管理员、医院领导、接口系统、系统 |
-| 使用场景 | 医院或科室需要围绕肺癌及后续多病种构建专病队列、研究数据集、风险预测模型、智能文书和模型反馈飞轮时，系统必须在不牺牲当前 OpenClaw 低负担服务主线的前提下，提供授权、队列筛选、数据治理、脱敏导出、模型注册、训练/验证、临床应用审计和研究成果追踪能力。 |
+| 使用场景 | 医院或科室需要围绕肺癌及后续多病种构建专病队列、研究数据集、风险预测模型、智能文书和模型反馈飞轮时，系统必须在不牺牲当前 DeepAgents 低负担服务主线的前提下，提供授权、队列筛选、数据治理、脱敏导出、模型注册、训练/验证、临床应用审计和研究成果追踪能力。 |
 | 功能说明 | 建立 `ResearchProject`、`ResearchProtocol`、`ResearchEthicsApproval`、`ResearchCohort`、`CohortCriteria`、`CohortMember`、`ResearchDataset`、`ResearchDatasetVersion`、`ResearchDataQualityCheck`、`DeidentificationPolicy`、`DatasetExportRequest`、`DatasetExportPackage`、`ExportApproval`、`ResearchAccessGrant`、`ModelRegistry`、`ModelVersion`、`ModelTrainingRun`、`ModelValidationRun`、`ModelEvaluationDataset`、`ModelDeployment`、`ModelInferenceAudit`、`ClinicalDocumentDraft`、`ClinicalDocumentReview`、`EmrWritebackRequest`、`ModelFeedbackRecord`、`AlgorithmComplianceRecord` 和 `ResearchOutcomeRecord`。P18 的专病队列、科研数据治理、科研模型管理和科研临床融合，收敛为科研项目和数据/模型治理闭环；P17 的 AI 模型管理、画像/路径推荐、方案生成、医患互动生成、路径调优、离院医嘱解析、AI 随访助手、智能文书、模型反馈和风险预测，收敛为模型注册、训练验证、临床文书审核回写和反馈数据飞轮，不直接替代各业务域状态机。 |
 | 业务规则 | FR-038 不直接面向患者提供科研、模型训练、风险预测、智能文书或导出入口。科研队列只能读取已授权、已入库、可追溯的数据源；研究数据集必须先通过数据质量检查、权限判定、脱敏策略和导出审批，才可生成导出包。模型训练、调试、优化、验证和应用必须绑定模型版本、训练数据集版本、验证数据集、适用范围、评估指标、风险边界和审批记录；未验证或未获准部署的模型不能进入医生端、管理端或 Gateway 的生产链路。AI 生成画像、路径建议、管理方案、随访摘要、咨询建议、转诊摘要、风险预测或智能文书时，只能输出候选、草稿、字段抽取、证据和不确定项；医生、医护或管理端确认前不得回写 EMR/HIS、不得改变路径、不得形成医疗结论、不得触发患者服务承诺。智能文书一键/单字段回写必须经过医生审核、字段级差异审计和接口回调确认。患者端不得展示科研队列、模型概率、相似患者结论、训练样本、风险预测或算法推理链。重复队列生成、重复导出审批、重复训练运行、重复验证、重复模型部署、重复文书回写按 `researchProjectId + cohortCriteriaVersion`、`datasetVersionId + exportPurpose`、`modelVersionId + runConfigHash`、`documentDraftId + writebackTarget` 等键幂等。 |
 | 页面/交互要求 | 科研工作台提供研究项目、伦理/审批记录、队列筛选、纳入/排除条件、队列预览、队列成员脱敏详情、数据集版本、质量检查、脱敏策略、导出申请、审批、导出包和导出历史。模型治理工作台提供模型注册、版本、训练运行、验证运行、评估集、指标、适用范围、上线审批、部署状态、推理审计和医生/运营反馈。医生端只在具体临床工作台中看到与本人任务相关的 AI 草稿、待确认字段、证据来源、差异对比、采纳/不适用反馈和回写按钮；不得让医生从科研后台直接处理患者服务。领导看板只看脱敏汇总的科研项目数量、数据集状态、模型验证结果、临床采纳趋势和合规问题，不看个体研究数据。 |
@@ -1311,7 +1311,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 所属模块 | Delivery Package、Deployment Environment、Integration Joint Test、SLA/Incident、Monitoring/Inspection、Release/Patch、Training、Acceptance、Compliance Evidence、Cost Boundary |
 | 需求来源 | Word M01-M10、N01-N06、O13、O14、O16、PN-11；承接 FR-029 数据接入治理、FR-030 权限审计、FR-033 通信/外呼、FR-034 运营质控、FR-035 内容审核、FR-037 指标督办、FR-038 算法合规记录 |
 | 用户角色 | 项目负责人、实施负责人、运维工程师、接口工程师、安全合规负责人、医院信息科、科室管理员、培训负责人、质控/验收负责人、供应商项目经理、系统 |
-| 使用场景 | 当 OpenClaw 从本地 mock、原型或院内试点进入生产化开发、部署、联调、培训、上线、运维和验收时，系统需要把 Word 中的部署形态、服务器/云资源、接口联调、7x24 支持、项目 SLA、巡检监控、故障处置、漏洞补丁、升级培训、等保/密评/算法备案、隐私协议、录音/日志留存、8 分钟演示、应急方案和验收资料沉淀为可配置、可追踪、可交付的证据包。 |
+| 使用场景 | 当 DeepAgents 从本地 mock、原型或院内试点进入生产化开发、部署、联调、培训、上线、运维和验收时，系统需要把 Word 中的部署形态、服务器/云资源、接口联调、7x24 支持、项目 SLA、巡检监控、故障处置、漏洞补丁、升级培训、等保/密评/算法备案、隐私协议、录音/日志留存、8 分钟演示、应急方案和验收资料沉淀为可配置、可追踪、可交付的证据包。 |
 | 功能说明 | 建立 `DeliveryProject`、`DeploymentEnvironment`、`InfrastructureResource`、`CommunicationResource`、`IntegrationJointTestRecord`、`DeliveryMilestone`、`DeliveryPackage`、`SupportSlaPolicy`、`SupportTicket`、`IncidentCase`、`IncidentResponseEvent`、`MonitoringRule`、`SystemHealthSnapshot`、`InspectionRecord`、`MaintenanceWindow`、`VulnerabilityRecord`、`PatchRelease`、`UpgradeRecord`、`TrainingPlan`、`TrainingSession`、`TrainingAttendance`、`KnowledgeTransferPackage`、`AcceptancePlan`、`AcceptanceEvidence`、`AcceptanceIssue`、`ComplianceEvidence`、`SecurityAssessmentRecord`、`PrivacySecurityAgreement`、`EmergencyResponsePlan`、`EmergencyDrillRecord`、`OperationReport`、`CostBoundaryRecord` 和 `ServiceCommitmentRecord`。PN-11 不是患者服务功能，而是把生产化条件、项目差异、合规材料、运维动作和验收证据结构化，形成研发、实施、医院信息科、运营和验收团队可共用的交付底座。 |
 | 业务规则 | FR-039 不改变患者、医生、管理端的医疗或服务状态机，不进入默认患者端，不把运维工单、合规证据或验收材料展示给患者。部署模式、服务器/云资源、通信线路、接口费用、服务期限、本地团队、响应阈值和费用承担必须按项目配置或合同边界记录，不能把眉山项目、区域项目或未来项目的阈值硬编码成统一规则。接口联调必须绑定接口清单、字段范围、频率、测试数据、回调口径、失败回退和责任方，联调通过前不得标记生产接口 ready。故障、数据异常、服务投诉和突发事件必须进入 `IncidentCase` 或既有服务闭环单（ServiceCase）关联对象，记录等级、SLA、响应、升级、恢复、复盘和患者/管理端必要回写。合规证据只能记录证明、协议、评估、备案、测评和留存策略，不等同于实际通过等保、密评或算法备案；上线状态必须等待证据上传、审批确认或项目负责人签署。重复环境发布、重复联调记录、重复故障报修、重复巡检、重复培训签到、重复验收证据上传和重复关闭问题按 `projectId + artifactType + version/sourceKey` 或 `incidentKey + actionType + sourceVersion` 幂等。 |
 | 页面/交互要求 | 生产化交付后台提供项目总览、部署环境、资源清单、接口联调、里程碑、培训计划、运维 SLA、故障事件、巡检记录、漏洞补丁、升级记录、合规证据、验收证据和费用边界清单。项目负责人看到是否具备上线条件、仍缺什么证据、当前责任人和预计完成时间。实施/运维人员可创建环境、登记资源、提交联调记录、响应故障、上传巡检和发布/补丁记录。培训负责人维护培训材料、场次、签到、考核和知识转移包。安全合规负责人维护等保、密评、算法备案、数据安全协议、隐私安全方案、录音/日志留存和知识产权授权证据。验收负责人查看演示脚本、测试报告、培训记录、运维材料、服务质量报告和未关闭问题。领导看板只可读取脱敏汇总的上线准备度、故障趋势、SLA 达成、合规证据完整度和验收问题数量。 |
@@ -1329,7 +1329,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 所属模块 | Patient Mobile Account、Identity Binding、Family Number、Caregiver Authorization、Low-sensitive Message Center、Patient Health Calendar Projection、Patient Data Entry、Access Audit |
 | 需求来源 | Word P15、N04、PN-12；承接 FR-003 患者端 H5、FR-005 报告中心打开与查看及 FR-006 报告检索、上传与整理给医生、FR-014 问医生、FR-027 Schedule Orchestrator、FR-029 Patient360/数据治理、FR-030 权限审计、FR-032 路径/随访、FR-033 通信触达、FR-035 内容/资源、FR-038 居民 AI 应用治理边界 |
 | 用户角色 | 患者、授权家属/照护者、管理端/客服、医生、系统管理员、消息接口系统、第三方身份源、系统 |
-| 使用场景 | 患者或家属通过手机号、验证码、微信/一键授权、医院身份或多因素认证登录 OpenClaw，需要绑定主患者身份、管理亲情号、授权家属协助上传资料/查看低敏待办/代办预约缴费、查看消息中心、健康日历、报告/档案摘要、资源入口和低负担 AI 应用入口。系统要保证患者端仍以 Gateway 为主入口，家属协同只同步患者授权范围内的低敏行动，不暴露病名分期、风险分数、模型推理或未经授权的报告/病历明细。 |
+| 使用场景 | 患者或家属通过手机号、验证码、微信/一键授权、医院身份或多因素认证登录 DeepAgents，需要绑定主患者身份、管理亲情号、授权家属协助上传资料/查看低敏待办/代办预约缴费、查看消息中心、健康日历、报告/档案摘要、资源入口和低负担 AI 应用入口。系统要保证患者端仍以 Gateway 为主入口，家属协同只同步患者授权范围内的低敏行动，不暴露病名分期、风险分数、模型推理或未经授权的报告/病历明细。 |
 | 功能说明 | 建立 `PatientMobileAccount`、`PatientIdentityBinding`、`PatientAuthMethod`、`IdentityVerificationAttempt`、`CaregiverMobileAccount`、`FamilyNumberBinding`、`CaregiverAuthorizationScope`、`CaregiverDelegatedAction`、`PatientMessage`、`MessageCategory`、`MessageDeliveryPreference`、`MessageDeliveryRecord`、`MessageReadReceipt`、`PatientHealthCalendarProjection`、`PatientHealthDataEntry`、`PatientProfileCard`、`PatientResourceBookmark`、`HealthPointsLedger`、`PatientAiAppEntry` 和 `PatientAccessAudit`。P15 的健康日历、健康数据、健康管理申请、档案报告、积分/亲情号、消息中心、居民 AI 应用、资源中心和账号体系，收敛为患者移动端投影、低敏消息、授权家属协同和可配置入口；具体医疗服务、报告解读、路径任务、问诊、医保、上门护理、内容资源、AI 应用和健康数据异常处理仍归对应 FR，不在 FR-040 重复定义业务状态机。 |
 | 业务规则 | FR-040 不是传统区域居民平台首页，不把 P15 的所有栏目默认堆到患者首屏；患者端继续 Gateway-first，健康日历、消息中心、档案/报告、资源和 AI 应用只作为当前任务、患者主动查看或项目配置入口出现。患者账号必须绑定 `PatientMaster` 或明确处于待核验状态；身份冲突不得自动合并。亲情号/家属绑定必须由患者本人、法定/授权代理规则或线下审核确认，确认前只形成邀请或申请，不改变可见范围。家属默认只看低敏行动信息：今日要做什么、需补什么、何时反馈、如何代办、处理结果；未经单独授权不得查看病名分期、风险分数、模型概率、推理链、完整报告、病历明细、科研信息或内部任务状态。患者可随时关闭家属同步、调整授权范围或撤回授权；撤回后必须立即影响后续消息分发、患者 360 投影、资料上传权限和代办动作。消息中心只展示患者/家属可理解的业务分类、当前状态、下一步、责任人和反馈位置；消息不能作为新的业务事实源，必须引用原 `Task`、服务闭环单（ServiceCase）、`NotificationCandidate`、报告、预约、支付、路径、随访、问诊、医保或上门护理领域对象。重复登录绑定、重复亲情号邀请、重复授权、重复消息生成、重复已读/关闭和重复代办动作按 `patientMasterId + authIdentityId`、`familyBindingId + scopeVersion`、`sourceObjectKey + messageCategory + audience` 或等价键幂等。 |
 | 页面/交互要求 | 患者端首页仍以 Gateway/当前卡片为中心；消息中心提供按“今天要做”“医生/服务团队反馈”“资料补充”“预约/支付”“报告/档案”“系统通知”等低负担分类查看，消息详情必须能回到对应业务卡或工作流。健康日历只展示从 FR-032/FR-027/检查/问诊/医保/护理等对象投影出的今日、本周或本周期行动，不让患者理解后台路径节点。健康数据录入支持文字、语音、图片或设备接口进入患者提供事实，异常提示只说明下一步，不展示危急值推理链。亲情号管理提供邀请、扫码/手机号绑定、授权范围、可代办事项、关闭同步和撤回入口。家属端只展示被授权患者的低敏待办、材料上传、预约/缴费辅助、消息和可读摘要；不能把家属端做成完整医生/管理端替代入口。管理端可协助核验亲情号申请、处理身份冲突、查看授权和访问审计，但不能默认打开完整病历。医生端只看到患者已授权家属联系方式或家属补充材料的来源标签，不处理家属账号后台。 |
@@ -1395,7 +1395,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | PatientCohort | 人群分组、重点关注、病种/阶段/风险/服务标签和动态队列 |
 | RiskStratification | 风险分层、颜色/等级配置、触发来源、人工复核和变更记录 |
 | EnrollmentCandidate | 筛查、医生推荐、管理端导入、HIS 已购服务包或患者主动咨询形成的入组/签约候选 |
-| Enrollment | 患者进入某个 OpenClaw 管理项目、病种范围或服务范围的生命周期对象 |
+| Enrollment | 患者进入某个 DeepAgents 管理项目、病种范围或服务范围的生命周期对象 |
 | BaselineAssessment | 入组/签约前后的基线评估、AI 结构化画像、人工复核和个性化报告 |
 | ManagementGoal | 患者级管理目标、复核状态、调整原因和责任人 |
 | ServiceCatalog | 服务目录，定义病种、人群、服务项目、开放范围、可见范围和责任团队 |
@@ -1563,7 +1563,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | FollowupResult | 随访、问卷、电话、资料上传或患者反馈后的结构化结果和异常标记 |
 | PathAdjustmentProposal | 基于患者画像、随访结果、复诊复查或人工发现形成的路径调整建议，确认前不改变路径事实 |
 | PathQualityMetric | 路径和随访执行质量指标，承接覆盖率、完成率、逾期率、异常处理率和服务履约统计 |
-| ChatMessage | 患者、医生、OpenClaw 必要提示的消息 |
+| ChatMessage | 患者、医生、DeepAgents 必要提示的消息 |
 | Task | 所有端共享任务对象 |
 | ServiceCase | 服务闭环单（ServiceCase）主对象，承接跨角色、跨系统、人工核对、异常处理、AI 辅助和同卡回写闭环；不替代具体领域主履约对象 |
 | ServiceCaseProjection | 服务闭环单按患者、医生、管理端、护理端、领导看板生成的角色投影，控制可见内容、当前动作、责任人和下一步 |
@@ -1618,7 +1618,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 字段名称 | 字段含义 | 字段类型 | 是否必填 | 来源 | 使用场景 |
 | --- | --- | --- | --- | --- | --- |
 | `patientId` | 源系统或存量兼容患者 ID | string | 是 | 医院系统/用户系统 | 与 `patientMasterId` 建立映射，兼容存量对象和源系统引用 |
-| `patientMasterId` | OpenClaw 主患者 ID | string | 是 | Patient Master | 跨系统、跨角色、跨服务闭环统一关联 |
+| `patientMasterId` | DeepAgents 主患者 ID | string | 是 | Patient Master | 跨系统、跨角色、跨服务闭环统一关联 |
 | `patientIndexKey` | 患者身份匹配幂等键 | string | 是 | Patient Index | 多就诊卡、多源系统身份归并与冲突检测 |
 | `sourceSystem` | 事实来源系统 | enum | 是 | HIS/EMR/LIS/PACS/收费/预约/公卫/随访/患者上传/管理端 | 事实溯源、权限、审计 |
 | `sourcePatientId` | 来源系统患者 ID | string | 否 | 源系统 | 与 `patientMasterId` 建立映射 |
@@ -2161,10 +2161,10 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | 报告中心 | 支持查看、上传、授权检索、Gateway 识别槽位带入、整理给医生和 AI 报告解读 Agent V1。报告详情页可在原文结论处点“帮我看懂这份报告”；检查结果回传卡可先点“帮我看懂这份报告”，报告解读只写 `report_interpretation_result` 和审计，不生成医生/管理任务。 | LIS/PACS/病理/基因接口、结构化解析、真实报告原文和真实对比趋势仍需接入；AI 报告解读目前使用 mock 报告字段和低敏模板。 | 建立报告事实表、来源追踪、`gatewayReportIntent`、`report_interpretation_result` 和 `report_interpretation_event/audit_log` 合同；检查结果可直接展示给患者，患者不清楚时先进入检查结果助手，患者确认整理给医生后才进入医生解释链路。 |
 | 检查检验/医嘱 | 支持项目选择、Gateway 槽位带入、审核/自助语义、待缴费、支付后正式任务和医嘱执行中心等演示；检查前后助手已补 mock 合同，检查前生成 `exam_preparation_candidate`，结果回传后生成 `exam_result_candidate`，患者查看、AI 解读或问医生解释写入 `exam_patient_action_record`；检查检验状态机生产化合同已补 `exam_workflow_record`、`payment_callback`、`appointment_callback`、`result_callback`。 | 真实医院项目库、支付回调、医生审核接口、结果直展和交通提示链路仍需迁移到服务端状态机。 | 区分 draft、payment_order、exam_order、doctor_order；待缴费只进患者任务栏，支付完成接口回传后才生成正式检查任务；自助申请审核通过进检查缴费，医生主动开医嘱进医嘱执行；预约接口回传后才更新预约状态；报告回传只生成患者查看候选，不默认医生待办；查看报告和 AI 解读不生成医生待办，患者主动确认“整理给医生解释/问医生解释”后才进入医生解释链路。 |
 | 心理支持 | Gateway 识别心理/睡眠/情绪或明显风险表达后才进入 SOP；一键拨号写服务日志并生成医生端可见信息任务；两问高风险才进入医生和运营升级。 | 正式心理支持电话、服务时间、责任团队、医生信息任务优先级、夜间和节假日高风险 SOP 未接真实配置。 | `psych_support_log` 与 `doctor_info_task` 分开；普通心理支持、明显风险表达、一键拨号和高风险两问必须区分，避免常驻强推荐和过度触发。 |
-| 交通/陪同/无障碍 | Gateway 已抽取服务类型、时间、院区、目的和新预约/修改/取消；打开入口不建任务；预约确认后占用；`OpenClawTransportStateMachine` 已补 `transport_service_workflow_record`、`third_party_reservation_callback`、`third_party_failure_callback`、`service_completed_callback` 和 `entitlement_deducted_after_24h`，第三方失败患者端显示“没有预约成功，需要重新安排 / 待服务团队处理”，管理端生成一条异常处理任务。 | 真实第三方交通/停车/陪同接口、服务完成回传、权益服务作业、责任边界识别和管理端处理动作仍需迁移到服务端。 | 建立服务端 `transport_service_task`、`transport_service_workflow_record`、`entitlement_hold`、第三方回调接收器和 `deduct_after_24h_job`；第三方失败不向患者展示为已预约，不生成医生待办，不扣次；第三方责任由管理端按流程和返回数据识别。 |
-| 上门护理 `home_care` | 已作为独立业务域嵌入单页原型，新增护理端入口。Gateway 可承接自然语言/图片占位/服务包线索，患者确认理解后才创建 `HomeCareApplication`；护理端覆盖预评估、上门前复核、签到、现场安全暂停、护理执行、护理记录、材料使用、教回法和异常上报；医生端只接收需要医疗判断的审核和现场异常响应；管理端覆盖服务配置、模板摘要、排班、退款/权益退回、投诉、转诊追踪、质控和 AI 审计。HC-P2 mock 已补服务模板中心、患者资料清单、项目同意、护理记录更正、随访、转诊关闭和 `OpenClawHomeCareApiAdapter`。 | 仍是本地 mock 原型；未接真实患者身份、真实病历/医嘱、真实支付/权益、真实定位签到、真实电子签名、真实文件短链、真实消息、真实排班、真实投诉/质控系统，也未完成模板字段的正式编辑发布流和护理文书导出。 | 生产化时建立 `home_care_service_template`、`home_care_application`、`home_care_visit`、`home_care_nursing_record`、`home_care_referral`、`home_care_refund`、`home_care_quality_review` 等服务端对象；所有状态变更必须由领域状态机写事件和审计。地区/机构差异通过管理端配置和服务上下线处理，不进入安全门。 |
-| 医保结算 Agent V1 | Gateway 已将医保/报销/结算从其他服务草稿中拆出，按 `gateway_agent_route` 统一编排 `OpenClawInsuranceAgent`、医学事实确认、材料包和管理办理；比例咨询只返回预计范围和核实下一步；材料缺失在患者确认后才生成医生/管理端闭环；患者端材料状态已收敛为“已有/缺少/我不清楚”，上传/拍照不再与材料状态并列；商业/补充保险作为基础医保之外的叠加保障，已支持只勾选、上传保单/截图识别和稍后在同卡继续上传；只勾选不上传时标记理赔条件暂不清楚，不生成医生或管理任务；材料包提交后已补材料级解决工作台，管理端接单会查询院内 mock 材料、区分“我不清楚/已找到/确实缺少/需服务团队处理”，院内查到的材料直接补齐并回写患者同一张任务卡；当医保所在地、就诊医院、医保类型、档位和所有材料状态均完整时，患者端显示 `reimbursement_estimate_ready` 报销预估结论卡，列出已用信息、建议路径、约比例、院内费用合计、预计报销和预计自费，不再显示卡点结构。 | 使用 mock `insurance_policy_rule`、mock 报销比例、mock 院内材料/费用查询和 mock 商保保单上传识别状态，暂不接真实医保结算、医院公众号、医保局、HIS/LIS/PACS/票据、商保公司理赔接口或支付接口；慈善赠药保留为后续费用权益 Agent 扩展。 | 服务端迁移时建立 `insurance_case`、`insurance_context_draft`、`insurance_supplement_claim`、`insurance_material_step`、`insurance_material_requirement`、`hospital_material_lookup`、`insurance_document_packet`、`insurance_reimbursement_estimate`、`insurance_workflow_event/audit_log`；Gateway 负责多 Agent 编排，医保 Agent 只返回领域判断和 `requiredCapabilities`；商保保单识别只给理赔条件线索，最终理赔条件由保险公司接口、保单规则或管理端确认后回写；管理端接单和材料查询必须幂等回写患者进度，真实报销结果只能由医保/医院接口或管理端确认回写。 |
-| 医保/费用明细查询 | 常用服务 `医保/费用查询` 默认查询医院收费 mock 数据，展示已发生的检查、检验、治疗、药品费用明细；Gateway 强费用明细词进入 `OpenClawBillingExpenseQuery`，报销路径词继续进入 `OpenClawInsuranceAgent`。 | 首次查询只读，不生成医生/管理任务；患者点击某笔费用疑问后自动带出该费用已查到的收费/用药/票据明细，患者点击“发送疑问”后由 Gateway 先分流：院内费用明细问题直接查明细回答；院外药房、外购药、自费药、处方/票据报销等问题按医保/费用规则说明；治疗必要性或医嘱合理性提示整理给医生确认；只有重复收费、金额错误、退费、票据异常、没用过/没做过/没收到对应药品或治疗等需人工核对时，才出现提交服务团队入口，患者确认后只生成单条管理端费用疑问任务，重复提交幂等；管理端费用疑问任务使用专属工作台和“接单并开始核对 / 请患者补充 / 转医生确认 / 回复患者并闭环”动作，接单、补问、医生转交和闭环结果都回写患者同一张费用卡；不承诺最终报销比例、退费或支付状态变更。 | 服务端迁移时建立 `billing_expense_record`、`billing_expense_query`、`billing_expense_question`、`billing_expense_event/audit_log`，并接 HIS/收费/票据/医保/支付接口；管理端人工兜底需回写同一张患者费用任务卡，医疗判断应回到问医生链路。 |
+| 交通/陪同/无障碍 | Gateway 已抽取服务类型、时间、院区、目的和新预约/修改/取消；打开入口不建任务；预约确认后占用；`DeepAgentsTransportStateMachine` 已补 `transport_service_workflow_record`、`third_party_reservation_callback`、`third_party_failure_callback`、`service_completed_callback` 和 `entitlement_deducted_after_24h`，第三方失败患者端显示“没有预约成功，需要重新安排 / 待服务团队处理”，管理端生成一条异常处理任务。 | 真实第三方交通/停车/陪同接口、服务完成回传、权益服务作业、责任边界识别和管理端处理动作仍需迁移到服务端。 | 建立服务端 `transport_service_task`、`transport_service_workflow_record`、`entitlement_hold`、第三方回调接收器和 `deduct_after_24h_job`；第三方失败不向患者展示为已预约，不生成医生待办，不扣次；第三方责任由管理端按流程和返回数据识别。 |
+| 上门护理 `home_care` | 已作为独立业务域嵌入单页原型，新增护理端入口。Gateway 可承接自然语言/图片占位/服务包线索，患者确认理解后才创建 `HomeCareApplication`；护理端覆盖预评估、上门前复核、签到、现场安全暂停、护理执行、护理记录、材料使用、教回法和异常上报；医生端只接收需要医疗判断的审核和现场异常响应；管理端覆盖服务配置、模板摘要、排班、退款/权益退回、投诉、转诊追踪、质控和 AI 审计。HC-P2 mock 已补服务模板中心、患者资料清单、项目同意、护理记录更正、随访、转诊关闭和 `DeepAgentsHomeCareApiAdapter`。 | 仍是本地 mock 原型；未接真实患者身份、真实病历/医嘱、真实支付/权益、真实定位签到、真实电子签名、真实文件短链、真实消息、真实排班、真实投诉/质控系统，也未完成模板字段的正式编辑发布流和护理文书导出。 | 生产化时建立 `home_care_service_template`、`home_care_application`、`home_care_visit`、`home_care_nursing_record`、`home_care_referral`、`home_care_refund`、`home_care_quality_review` 等服务端对象；所有状态变更必须由领域状态机写事件和审计。地区/机构差异通过管理端配置和服务上下线处理，不进入安全门。 |
+| 医保结算 Agent V1 | Gateway 已将医保/报销/结算从其他服务草稿中拆出，按 `gateway_agent_route` 统一编排 `DeepAgentsInsuranceAgent`、医学事实确认、材料包和管理办理；比例咨询只返回预计范围和核实下一步；材料缺失在患者确认后才生成医生/管理端闭环；患者端材料状态已收敛为“已有/缺少/我不清楚”，上传/拍照不再与材料状态并列；商业/补充保险作为基础医保之外的叠加保障，已支持只勾选、上传保单/截图识别和稍后在同卡继续上传；只勾选不上传时标记理赔条件暂不清楚，不生成医生或管理任务；材料包提交后已补材料级解决工作台，管理端接单会查询院内 mock 材料、区分“我不清楚/已找到/确实缺少/需服务团队处理”，院内查到的材料直接补齐并回写患者同一张任务卡；当医保所在地、就诊医院、医保类型、档位和所有材料状态均完整时，患者端显示 `reimbursement_estimate_ready` 报销预估结论卡，列出已用信息、建议路径、约比例、院内费用合计、预计报销和预计自费，不再显示卡点结构。 | 使用 mock `insurance_policy_rule`、mock 报销比例、mock 院内材料/费用查询和 mock 商保保单上传识别状态，暂不接真实医保结算、医院公众号、医保局、HIS/LIS/PACS/票据、商保公司理赔接口或支付接口；慈善赠药保留为后续费用权益 Agent 扩展。 | 服务端迁移时建立 `insurance_case`、`insurance_context_draft`、`insurance_supplement_claim`、`insurance_material_step`、`insurance_material_requirement`、`hospital_material_lookup`、`insurance_document_packet`、`insurance_reimbursement_estimate`、`insurance_workflow_event/audit_log`；Gateway 负责多 Agent 编排，医保 Agent 只返回领域判断和 `requiredCapabilities`；商保保单识别只给理赔条件线索，最终理赔条件由保险公司接口、保单规则或管理端确认后回写；管理端接单和材料查询必须幂等回写患者进度，真实报销结果只能由医保/医院接口或管理端确认回写。 |
+| 医保/费用明细查询 | 常用服务 `医保/费用查询` 默认查询医院收费 mock 数据，展示已发生的检查、检验、治疗、药品费用明细；Gateway 强费用明细词进入 `DeepAgentsBillingExpenseQuery`，报销路径词继续进入 `DeepAgentsInsuranceAgent`。 | 首次查询只读，不生成医生/管理任务；患者点击某笔费用疑问后自动带出该费用已查到的收费/用药/票据明细，患者点击“发送疑问”后由 Gateway 先分流：院内费用明细问题直接查明细回答；院外药房、外购药、自费药、处方/票据报销等问题按医保/费用规则说明；治疗必要性或医嘱合理性提示整理给医生确认；只有重复收费、金额错误、退费、票据异常、没用过/没做过/没收到对应药品或治疗等需人工核对时，才出现提交服务团队入口，患者确认后只生成单条管理端费用疑问任务，重复提交幂等；管理端费用疑问任务使用专属工作台和“接单并开始核对 / 请患者补充 / 转医生确认 / 回复患者并闭环”动作，接单、补问、医生转交和闭环结果都回写患者同一张费用卡；不承诺最终报销比例、退费或支付状态变更。 | 服务端迁移时建立 `billing_expense_record`、`billing_expense_query`、`billing_expense_question`、`billing_expense_event/audit_log`，并接 HIS/收费/票据/医保/支付接口；管理端人工兜底需回写同一张患者费用任务卡，医疗判断应回到问医生链路。 |
 | 其他服务/还有别的事 | Gateway 已先匹配已有功能；营养餐、送餐、复诊/随访和一般费用票据等不能直接落到已有功能时，先进入其他服务草稿，患者确认后才写反馈池、患者任务和 `task_event`，重复确认幂等。 | 真实服务目录、运营反馈池分类、服务包配置评估和管理端处理闭环未接。 | 建立 `other_service_draft` 和 `feedback_item`；不能识别到一句话就创建宽泛任务，必须先排除已有功能并确认；全局入口用“还有别的事”，具体任务续接用“继续 + 对象”；医保/报销/结算不得回退到其他服务反馈池，上门护理不得回退到其他服务反馈池。 |
 | 管理端任务池 | 已有复查准备、交通、心理等服务任务卡和基础动作。 | 需要真实接单、转派、SLA、备注、补问、关闭原因、异常升级。 | 管理端统一 Service Task Pool；所有动作写 `task_event` 和 `audit_log`。 |
 | 医生端待办中心 | 顶部待办、折叠、消息同步和部分任务处理已具备原型。 | 需要统一医生待办来源、优先级、已读、处理动作、关闭条件。 | Doctor Todo Center 只展示需要医生判断的事项；普通服务任务不打扰医生。 |
@@ -2953,7 +2953,7 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 | `psych-gateway-sop-regression.mjs` | 心理支持按 Gateway/主动选择触发、一键拨号日志和医生信息任务、高风险两问升级。 | 修改心理支持入口、拨号、医生同步和高风险 SOP。 | `node click-test-artifacts/psych-gateway-sop-regression.mjs .` |
 | `other-service-gateway-draft-regression.mjs` | 其他服务先匹配已有功能，不能落到已有功能时进入草稿，确认后反馈/任务/event 幂等；全局“还有别的事”和服务草稿确认页不得暴露内部词。 | 修改还有别的事、具体任务续接、其他服务、反馈池和服务需求路由。 | `node click-test-artifacts/other-service-gateway-draft-regression.mjs .` |
 | `home-care-p2-completion-regression.js` | 上门护理 HC-P2 mock 合同：服务模板、资料补齐、项目同意、签到、护理记录更正、随访、转诊关闭和 API adapter。 | 修改 `home_care` 合同、状态机、模板或接口 adapter。 | `node click-test-artifacts/home-care-p2-completion-regression.js` |
-| `home-care-production-adapter-regression.js` | 上门护理生产化 adapter 边界：12 个真实接入域、稳定 integration request、mock_contract 状态、无业务副作用和 index/manifest 挂载一致。 | 修改 `OpenClawHomeCareProductionAdapters`、`OpenClawHomeCareApiAdapter`、真实接口接入域或 `homeCareIntegrationEvents`。 | `node click-test-artifacts/home-care-production-adapter-regression.js` |
+| `home-care-production-adapter-regression.js` | 上门护理生产化 adapter 边界：12 个真实接入域、稳定 integration request、mock_contract 状态、无业务副作用和 index/manifest 挂载一致。 | 修改 `DeepAgentsHomeCareProductionAdapters`、`DeepAgentsHomeCareApiAdapter`、真实接口接入域或 `homeCareIntegrationEvents`。 | `node click-test-artifacts/home-care-production-adapter-regression.js` |
 | `home-care-fact-source-adapter-regression.js` | 上门护理事实源接入切片 1：患者身份/授权、医嘱/病历只读、图片证据、缺项澄清、API 快照、幂等和确认前无业务副作用。 | 修改 `readFactSourceSnapshot()`、`prepareFactSourceSnapshot()`、事实源 adapter、Gateway 低认知事实源准备或 `homeCareFactSourceSnapshots`。 | `node click-test-artifacts/home-care-fact-source-adapter-regression.js` |
 | `home-care-fact-source-domain-regression.js` | 上门护理事实源领域动作切片：153 模块暴露、图片证据记录、事实源快照准备、事件/审计、adapter 委托幂等和确认前无业务副作用。 | 修改 153 事实源领域模块、144 的 `recordImageEvidence/prepareFactSourceSnapshot`、图片证据、事实源快照或 `homeCareFactSourceSnapshots`。 | `node click-test-artifacts/home-care-fact-source-domain-regression.js` |
 | `home-care-document-supplement-domain-regression.js` | 上门护理资料补充领域动作切片：154 模块暴露、`updateDocuments()` 委托、资料要求重算、临床医嘱证据行、护士预评估回流、事件/审计和重复提交幂等。 | 修改 154 资料补充领域模块、144 的 `updateDocuments`、患者补资料、资料要求、临床医嘱证据或待补资料状态。 | `node click-test-artifacts/home-care-document-supplement-domain-regression.js` |
@@ -3036,15 +3036,15 @@ home_care 实现切片说明：`home_care` 的多来源触发 mock API、147 与
 
 ## 附录 B. P/O/M/N 外部需求差距与新增能力池
 
-本附录承接 `/Users/max_1/Desktop/拓扑/产品思路/产品要求/Product Function and Service Requirements.docx` 的 P/O/M/N 需求池，以及 `docs/pomn-requirement-fr-gap-table-20260807.md` 的差距判断。它用于把采购型全病程平台需求拆成 OpenClaw 后续新增能力，不直接改变当前 `index.html` demo，也不把平台后台能力暴露为患者端菜单。
+本附录承接 `/Users/max_1/Desktop/拓扑/产品思路/产品要求/Product Function and Service Requirements.docx` 的 P/O/M/N 需求池，以及 `docs/pomn-requirement-fr-gap-table-20260807.md` 的差距判断。它用于把采购型全病程平台需求拆成 DeepAgents 后续新增能力，不直接改变当前 `index.html` demo，也不把平台后台能力暴露为患者端菜单。
 
 ### B.0 外部能力接入定位
 
-`Product Function and Service Requirements.docx` 定位为医院全程管理能力要求库，覆盖功能、数据、系统、运营、运维、合规和验收等医院侧要求。它用于补全 OpenClaw 的系统能力、后台能力、接口能力、运营能力和交付能力，不替代本 PRD 已确认的产品定位。
+`Product Function and Service Requirements.docx` 定位为医院全程管理能力要求库，覆盖功能、数据、系统、运营、运维、合规和验收等医院侧要求。它用于补全 DeepAgents 的系统能力、后台能力、接口能力、运营能力和交付能力，不替代本 PRD 已确认的产品定位。
 
-OpenClaw 的产品定位不因该 Word 文档改变：当前主线仍是以患者 Gateway 为入口，以服务闭环单（ServiceCase）贯穿患者端、医生端、管理端和领导视角的肺癌全程管理产品。后续迭代必须在现有产品设计思路上吸收外部要求，而不是照搬传统医院平台菜单、区域慢病平台结构或后台模块堆叠。
+DeepAgents 的产品定位不因该 Word 文档改变：当前主线仍是以患者 Gateway 为入口，以服务闭环单（ServiceCase）贯穿患者端、医生端、管理端和领导视角的肺癌全程管理产品。后续迭代必须在现有产品设计思路上吸收外部要求，而不是照搬传统医院平台菜单、区域慢病平台结构或后台模块堆叠。
 
-所有 P/O/M/N 需求进入正文 FR 前，必须先完成“OpenClaw 化”拆解：
+所有 P/O/M/N 需求进入正文 FR 前，必须先完成“DeepAgents 化”拆解：
 
 | 拆解问题 | PRD 必须回答 |
 | --- | --- |
@@ -3058,7 +3058,7 @@ OpenClaw 的产品定位不因该 Word 文档改变：当前主线仍是以患�
 
 ### B.1 处理原则
 
-1. 当前 OpenClaw 主线仍是肺癌全程管理 Gateway，不改成采购文档的全量多病种平台首页。
+1. 当前 DeepAgents 主线仍是肺癌全程管理 Gateway，不改成采购文档的全量多病种平台首页。
 2. 新增能力先进入附录和 backlog；进入研发前必须再回写到正文 FR、数据字段、接口清单、测试标准和上线前配置项。
 3. 设计迭代必须以后续 PRD 正文 FR 或本附录已完成的能力拆解为依据；不能从 Word 原始条目直接生成 UI、页面或菜单。
 4. 患者端继续 Gateway-first；组织权限、数据治理、运营质控、运维合规、科研等能力放在后台、接口或交付包，不进入默认患者体验。

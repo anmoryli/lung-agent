@@ -1,6 +1,6 @@
-﻿# Agent Service
+# Agent Service
 
-OpenClaw 的 Agent as a Service 最小可运行版。DeepAgents 提供四个角色主 Agent，Gateway 是统一 HTTP 入口和唯一调度点。
+DeepAgents 的 Agent as a Service 最小可运行版。DeepAgents 提供四个角色主 Agent，Gateway 是统一 HTTP 入口和唯一调度点。
 
 ## 本地启动
 

@@ -1,4 +1,4 @@
-const STORAGE_KEY = "openclaw.patient-chat.v1";
+const STORAGE_KEY = "deepagents.patient-chat.v1";
     const conversation = document.querySelector("#conversation");
     const form = document.querySelector("#chatForm");
     const input = document.querySelector("#messageInput");
@@ -48,7 +48,8 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
       row.className = `message ${message.role}${isError ? " message-error" : ""}`;
       const bubble = document.createElement("div");
       bubble.className = `bubble${pending ? " pending" : ""}`;
-      bubble.textContent = message.content;
+      if (message.role === "assistant") renderMarkdown(bubble, message.content);
+      else bubble.textContent = message.content;
       if (message.role === "assistant") {
         const avatar = document.createElement("div");
         avatar.className = "avatar";
@@ -60,6 +61,129 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
       conversation.append(row);
       scrollToBottom();
       return { row, bubble };
+    }
+
+    function renderMarkdown(target, source) {
+      target.replaceChildren();
+      const lines = source.replace(/\r/g, "").split("\n");
+      let index = 0;
+      while (index < lines.length) {
+        if (!lines[index].trim()) { index += 1; continue; }
+
+        const fence = lines[index].match(/^\s*```([\w-]*)\s*$/);
+        if (fence) {
+          index += 1;
+          const code = [];
+          while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) code.push(lines[index++]);
+          if (index < lines.length) index += 1;
+          const pre = document.createElement("pre");
+          const codeNode = document.createElement("code");
+          if (fence[1]) codeNode.className = `language-${fence[1]}`;
+          codeNode.textContent = code.join("\n");
+          pre.append(codeNode);
+          target.append(pre);
+          continue;
+        }
+
+        const heading = lines[index].match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+          const node = document.createElement(`h${heading[1].length}`);
+          appendInlineMarkdown(node, heading[2]);
+          target.append(node);
+          index += 1;
+          continue;
+        }
+
+        if (/^\s*([-*_])\s*\1\s*\1[-*_\s]*$/.test(lines[index])) {
+          target.append(document.createElement("hr"));
+          index += 1;
+          continue;
+        }
+
+        if (/^\s*>/.test(lines[index])) {
+          const quote = document.createElement("blockquote");
+          while (index < lines.length && /^\s*>/.test(lines[index])) {
+            const line = lines[index++].replace(/^\s*>\s?/, "");
+            if (quote.childNodes.length) quote.append(document.createElement("br"));
+            appendInlineMarkdown(quote, line);
+          }
+          target.append(quote);
+          continue;
+        }
+
+        const listStart = lines[index].match(/^\s*((?:[-+*])|(?:\d+\.))\s+(.+)$/);
+        if (listStart) {
+          const ordered = /^\d/.test(listStart[1]);
+          const list = document.createElement(ordered ? "ol" : "ul");
+          while (index < lines.length) {
+            const item = lines[index].match(/^\s*((?:[-+*])|(?:\d+\.))\s+(.+)$/);
+            if (!item || /^\d/.test(item[1]) !== ordered) break;
+            const li = document.createElement("li");
+            appendInlineMarkdown(li, item[2]);
+            list.append(li);
+            index += 1;
+          }
+          target.append(list);
+          continue;
+        }
+
+        const paragraph = [];
+        while (index < lines.length && lines[index].trim() && !startsMarkdownBlock(lines[index])) {
+          paragraph.push(lines[index++].trim());
+        }
+        if (!paragraph.length) paragraph.push(lines[index++]);
+        const p = document.createElement("p");
+        appendInlineMarkdown(p, paragraph.join(" "));
+        target.append(p);
+      }
+    }
+
+    function startsMarkdownBlock(line) {
+      return /^\s*```|^#{1,6}\s|^\s*>|^\s*(([-+*])|\d+\.)\s+/.test(line);
+    }
+
+    function appendInlineMarkdown(parent, text) {
+      const tokenPattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]+\]\([^)]+\))/g;
+      let cursor = 0;
+      for (const match of text.matchAll(tokenPattern)) {
+        parent.append(document.createTextNode(text.slice(cursor, match.index)));
+        const token = match[0];
+        let node;
+        if (token.startsWith("`")) {
+          node = document.createElement("code");
+          node.textContent = token.slice(1, -1);
+        } else if (token.startsWith("**") || token.startsWith("__")) {
+          node = document.createElement("strong");
+          node.textContent = token.slice(2, -2);
+        } else if (token.startsWith("*") || token.startsWith("_")) {
+          node = document.createElement("em");
+          node.textContent = token.slice(1, -1);
+        } else {
+          const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+          const url = link && safeMarkdownUrl(link[2]);
+          if (url) {
+            node = document.createElement("a");
+            node.href = url;
+            node.target = "_blank";
+            node.rel = "noopener noreferrer";
+            node.textContent = link[1];
+          } else {
+            node = document.createTextNode(link ? link[1] : token);
+          }
+        }
+        parent.append(node);
+        cursor = match.index + token.length;
+      }
+      parent.append(document.createTextNode(text.slice(cursor)));
+    }
+
+    function safeMarkdownUrl(value) {
+      try {
+        const url = new URL(value, window.location.href);
+        return ["https:", "http:", "mailto:"].includes(url.protocol) ? url.href : null;
+      } catch {
+        return null;
+      }
     }
 
     function scrollToBottom() {
@@ -112,6 +236,7 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
       if (!lastUser) return;
       const assistant = addMessage("assistant", "");
       const rendered = renderMessage(assistant, true);
+      let pendingInterrupts = [];
       const controller = new AbortController();
       activeController = controller;
       setBusy(true);
@@ -153,7 +278,7 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
             try { event = JSON.parse(data); } catch { continue; }
             if (event.type === "TEXT_MESSAGE_CONTENT") {
               assistant.content += event.delta || "";
-              rendered.bubble.textContent = assistant.content;
+              renderMarkdown(rendered.bubble, assistant.content);
               rendered.bubble.classList.add("pending");
               scrollToBottom();
             } else if (event.type === "RUN_FINISHED") {
@@ -161,7 +286,7 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
               rendered.bubble.classList.remove("pending");
               const outcome = event.outcome;
               if (outcome?.type === "interrupt" && Array.isArray(outcome.interrupts)) {
-                showInterrupt(rendered.bubble, outcome.interrupts);
+                pendingInterrupts = outcome.interrupts;
               }
             } else if (event.type === "RUN_ERROR") {
               throw new Error(event.message || "Agent 本轮运行失败");
@@ -179,7 +304,8 @@ const STORAGE_KEY = "openclaw.patient-chat.v1";
           rendered.row.classList.add("message-error");
         }
       } finally {
-        rendered.bubble.textContent = assistant.content;
+        renderMarkdown(rendered.bubble, assistant.content);
+        if (pendingInterrupts.length) showInterrupt(rendered.bubble, pendingInterrupts);
         rendered.bubble.classList.remove("pending");
         if (state === runState) saveState();
         if (activeController === controller) activeController = null;
