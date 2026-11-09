@@ -54,7 +54,8 @@ class PatientAgentRegistry:
         return values
 
     def deepagent_specs(
-        self, available_tools: dict[str, Any], patient_id: str, task_key: str
+        self, available_tools: dict[str, Any], patient_id: str, task_key: str,
+        long_term_profile: str = "",
     ) -> list[dict[str, Any]]:
         """把已发现的 Agent 转成 DeepAgents 原生 task 工具可委派的配置。"""
         from backend.integrations.mcp.patient_fhir import WRITE_TOOLS, make_patient_tool
@@ -75,7 +76,10 @@ class PatientAgentRegistry:
             subagents.append({
                 "name": specialist.name,
                 "description": specialist.description,
-                "system_prompt": specialist.system_prompt,
+                "system_prompt": specialist.system_prompt + (
+                    "\n\n当前患者的长期记忆摘要（仅供个性化沟通，过期/低权重内容不会注入）：\n" + long_term_profile
+                    if long_term_profile else ""
+                ),
                 "tools": tools,
                 "interrupt_on": interrupt_on,
                 "mode": "isolated",

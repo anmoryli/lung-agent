@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ag_ui.core import (
+    ActivitySnapshotEvent,
     BaseEvent,
     EventType,
     RunAgentInput,
@@ -36,10 +37,12 @@ from backend.shared.sessions.session_store import PatientSessionStore
 from backend.shared.tasking.idempotency_store import IdempotencyConflict
 from backend.runtime.active_runs import active_runs
 from backend.runtime.async_runner import run_async, submit_async
+from backend.runtime.model_registry import ModelRegistry
 
 
 gateway = Gateway()
 session_store = PatientSessionStore()
+model_registry = ModelRegistry(session_store)
 
 
 async def _load_patient_profile(patient_id: str, memory_store: Any) -> dict[str, Any]:
@@ -73,6 +76,7 @@ async def _load_patient_profile(patient_id: str, memory_store: Any) -> dict[str,
         "patientId": patient_id,
         "fhir": fhir,
         "memories": memory_store.list_patient_entries(patient_id),
+        "memoryProfile": memory_store.build_long_term_profile(patient_id),
         "retrievals": memory_store.list_retrievals(patient_id, limit=100),
         "sessions": sessions,
         "storage": {
@@ -156,6 +160,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if request_path == "/api/v1/agents/patient/profile":
             self._send_patient_profile(parse_qs(parsed.query).get("patientId", [""])[0])
             return
+        if request_path == "/api/v1/agents/patient/models":
+            self._send_patient_models()
+            return
         session_match = re.fullmatch(r"/api/v1/agents/patient/sessions/([A-Za-z0-9_.:-]{1,128})", request_path)
         if session_match:
             self._send_patient_session(session_match.group(1), parse_qs(parsed.query).get("patientId", [""])[0])
@@ -193,7 +200,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         path = urlparse(self.path).path
-        if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import", "/api/v1/agents/patient/profile"} and not path.startswith(
+        if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import", "/api/v1/agents/patient/profile", "/api/v1/agents/patient/models", "/api/v1/agents/patient/model"} and not path.startswith(
             ("/api/v1/agents/patient/runs/", "/api/v1/agents/patient/sessions")
         ):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "找不到这个地址。"})
@@ -212,6 +219,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             return
         if request_path == "/api/v1/agents/patient/ag-ui":
             self._handle_agui()
+            return
+        if request_path == "/api/v1/agents/patient/model":
+            self._select_patient_model()
             return
         path = request_path.strip("/").split("/")
         if len(path) != 5 or path[:3] != ["api", "v1", "agents"] or path[4] != "invoke":
@@ -286,6 +296,31 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json(HTTPStatus.OK, profile)
 
+    def _send_patient_models(self) -> None:
+        try:
+            catalog = run_async(model_registry.list_models())
+        except Exception:
+            logging.exception("读取模型能力清单失败")
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": "无法从模型服务读取上下文窗口。"})
+            return
+        self._send_json(HTTPStatus.OK, catalog)
+
+    def _select_patient_model(self) -> None:
+        try:
+            data = self._read_request()
+            model_id = data.get("modelId")
+            if not isinstance(model_id, str) or not model_id.strip() or len(model_id) > 128:
+                raise ValueError("modelId 必须是 1 到 128 个字符。")
+            selected = run_async(model_registry.select_model(model_id.strip()))
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        except Exception:
+            logging.exception("切换患者 Agent 模型失败")
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": "模型切换失败，请检查模型服务。"})
+            return
+        self._send_json(HTTPStatus.OK, {"selected": selected})
+
     def _import_session(self) -> None:
         """把旧版页面里尚未进入服务端的聊天记录迁入会话目录。"""
         try:
@@ -318,6 +353,18 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
 
+        try:
+            selected_model = run_async(model_registry.active_model())
+        except Exception:
+            logging.exception("解析当前模型上下文窗口失败")
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "当前模型没有可用的上下文窗口资料。"})
+            return
+        context["_model_id"] = selected_model["id"]
+        context["_model_name"] = selected_model["name"]
+        context["_model_context_window"] = selected_model["context_window"]
+        context["_model_input_budget"] = selected_model["input_budget_tokens"]
+        context["_model_max_output_tokens"] = selected_model["max_output_tokens"]
+
         request_messages = _messages_from_run_input(run_input)
         previous_session = session_store.get(run_input.thread_id, patient_id)
         session_store.save(
@@ -325,7 +372,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             agent_state=(previous_session or {}).get("agent_state"),
             pending_interrupts=(previous_session or {}).get("pending_interrupts"),
         )
-        progress: dict[str, Any] = {"state": {}, "answer": ""}
+        progress: dict[str, Any] = {"state": {}, "answer": "", "activities": {}}
         try:
             agent = gateway.get_agent("patient")
             context["conversationId"] = run_input.thread_id
@@ -357,6 +404,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     if push_state:
                         events.put(("state", snapshot))
 
+                def send_activity(item: dict[str, Any]) -> None:
+                    events.put(("activity", item))
+
                 if agent._needs_urgent_care(message):
                     send_state({"activity": "正在提供安全提醒", "todos": []})
                     reply = "你提到了需要尽快处理的情况。如果这些症状现在正在发生，或你担心自己会受伤，请马上联系当地急救或去最近的急诊；也请让身边可信任的人陪着你。"
@@ -369,6 +419,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     lambda delta: events.put(("delta", delta)),
                     lambda interrupts: events.put(("interrupt", interrupts)),
                     send_state,
+                    send_activity,
                 )
 
             future = submit_async(run_patient())
@@ -401,7 +452,17 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 run_id=run_input.run_id,
             ))
             if push_state:
-                progress["state"] = {"activity": "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", "todos": []}
+                progress["state"] = {
+                    "activity": "正在处理请求", "todos": [],
+                    "model": {
+                        "model_id": selected_model["id"],
+                        "model_name": selected_model["name"],
+                        "context_window": selected_model["context_window"],
+                        "input_budget_tokens": selected_model["input_budget_tokens"],
+                        "max_output_tokens": selected_model["max_output_tokens"],
+                        "estimated_input_tokens": 0,
+                    },
+                }
                 self._write_event(encoder, StateSnapshotEvent(
                     type=EventType.STATE_SNAPSHOT,
                     snapshot=progress["state"],
@@ -433,6 +494,20 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     self._write_event(encoder, StateSnapshotEvent(
                         type=EventType.STATE_SNAPSHOT,
                         snapshot=value,
+                    ))
+                elif kind == "activity":
+                    progress["activities"][value["id"]] = value
+                    snapshot = sorted(
+                        progress["activities"].values(),
+                        key=lambda item: item.get("updated_at", 0),
+                        reverse=True,
+                    )
+                    self._write_event(encoder, ActivitySnapshotEvent(
+                        type=EventType.ACTIVITY_SNAPSHOT,
+                        message_id="patient-agent-activity",
+                        activity_type="AGENT_TRACE",
+                        content={"items": snapshot},
+                        replace=True,
                     ))
                 elif kind == "done":
                     if not streamed and value:

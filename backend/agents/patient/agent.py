@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
+import time
 from pathlib import Path
 from functools import cached_property
 from typing import Any, Callable
@@ -34,7 +36,8 @@ PATIENT_PROMPT = """
 
 默认从当前患者自己的对话归档中按语义召回相关内容，并归档新的对话。只允许在同一合成患者编号下检索；患者明确要求不再保存时停止归档并清除该患者的向量记忆。
 
-记忆默认可读取，不再询问授权。患者明确要求“记住”时，可以直接保存沟通偏好和服务安排；长期记忆不保存症状、报告、诊断或用药。
+记忆默认可读取，不再询问授权。每轮都要把系统维护的短期患者偏好摘要纳入模型上下文；对话归档仍单独做向量检索，不能把旧归档直接当成当前事实。患者明确要求“记住”时，可以直接保存沟通偏好和服务安排；长期记忆不保存症状、报告、诊断或用药。
+患者明确纠正旧偏好时，用 supersedes_id 替代旧条目；来源互相矛盾且无法确认新旧时，用 conflicts_with_id 标成冲突，双方都不放入每轮摘要。
 """.strip()
 
 URGENT_TERMS = (
@@ -87,9 +90,19 @@ class PatientMainAgent(RoleMainAgent):
         on_delta: Callable[[str], None] | None = None,
         on_interrupt: Callable[[list[dict[str, Any]]], None] | None = None,
         on_state: Callable[[dict[str, Any]], None] | None = None,
+        on_activity: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         current_todos: list[dict[str, str]] = []
         current_activity = "正在准备本轮处理"
+        model_context = {
+            "model_id": context.get("_model_id", ""),
+            "model_name": context.get("_model_name", ""),
+            "context_window": context.get("_model_context_window", 0),
+            "input_budget_tokens": context.get("_model_input_budget", 0),
+            "summarization_trigger_tokens": round(context.get("_model_input_budget", 0) * 0.85),
+            "max_output_tokens": context.get("_model_max_output_tokens", 0),
+            "estimated_input_tokens": 0,
+        }
 
         def update_state(activity: str, todos: list[dict[str, str]] | None = None) -> None:
             nonlocal current_activity, current_todos
@@ -97,13 +110,21 @@ class PatientMainAgent(RoleMainAgent):
             if todos is not None:
                 current_todos = todos
             if on_state is not None:
-                on_state({"activity": current_activity, "todos": current_todos})
+                on_state({"activity": current_activity, "todos": current_todos, "model": model_context})
 
         if not os.getenv("OPENAI_API_KEY", "").strip():
             raise AgentConfigurationError("请先配置 OPENAI_API_KEY。")
-        model = os.getenv("DEEPAGENTS_MODEL", "openai:gpt-4.1-mini").strip()
-        if not model.startswith("openai:"):
-            raise AgentConfigurationError("当前只接入 OpenAI 兼容模型，请使用 openai:模型名 格式。")
+        model_id = str(context.get("_model_id") or os.getenv("DEEPAGENTS_MODEL", "openai:deepseek-flash").split(":", 1)[-1]).strip()
+        model_name = f"openai:{model_id}"
+        context_window = context.get("_model_context_window")
+        input_budget = context.get("_model_input_budget")
+        max_output_tokens = context.get("_model_max_output_tokens")
+        if (
+            not isinstance(context_window, int)
+            or not isinstance(input_budget, int)
+            or not isinstance(max_output_tokens, int)
+        ):
+            raise AgentConfigurationError("当前模型没有可验证的上下文窗口资料。")
 
         patient_id = patient_id_from_context(context)
         task_key = str(context.get("_task_key", "patient-task"))[:128]
@@ -123,8 +144,13 @@ class PatientMainAgent(RoleMainAgent):
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
         from langgraph.types import Command
 
-        # DeepAgents 继续负责编排；只有 SSE 请求显式打开 LangChain 模型流式输出。
-        streaming_model = init_chat_model(model, streaming=True) if on_delta is not None else model
+        # 总上下文窗口包含输入和输出；给摘要中间件的输入预算先预留最大输出空间。
+        streaming_model = init_chat_model(model_name, streaming=on_delta is not None)
+        streaming_model.profile = {
+            **(streaming_model.profile or {}),
+            "max_input_tokens": input_budget,
+            "max_output_tokens": max_output_tokens,
+        }
 
         # 非患者角色仍然不带 task 工具；只有这里显式配置子 Agent 的图会启用委派。
         register_harness_profile(
@@ -141,24 +167,30 @@ class PatientMainAgent(RoleMainAgent):
             await asyncio.to_thread(memory.delete_patient, patient_id)
         elif on_state is not None:
             update_state("正在查找相关历史记忆")
+        long_term_profile = await asyncio.to_thread(memory.build_long_term_profile, patient_id)
         recalled = await asyncio.to_thread(
             memory.search, patient_id, message, 4, thread_id
         ) if memory_enabled else []
         memory_tool = lambda query: memory.search(patient_id, query, limit=5, conversation_id=thread_id)
-        remember = lambda content: memory.remember(patient_id, content, thread_id)
+        remember = lambda content, category, importance, expires_in_days, supersedes_id, evidence, conflicts_with_id: memory.remember(
+            patient_id, content, thread_id, category, importance, expires_in_days,
+            supersedes_id, evidence, conflicts_with_id,
+        )
 
         update_state("正在连接患者资料")
         async with MCPAdapter(mcp_transport()) as adapter:
             available = {item.name: item for item in await adapter.list_tools()}
             registry = PatientAgentRegistry()
-            subagents = registry.deepagent_specs(available, patient_id, task_key)
+            subagents = registry.deepagent_specs(
+                available, patient_id, task_key, long_term_profile["summary"]
+            )
             tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
             async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
                 await checkpointer.setup()
                 graph = create_deep_agent(
                     model=streaming_model,
                     tools=tools,
-                    system_prompt=self._prompt_with_context(recalled),
+                    system_prompt=self._prompt_with_context(recalled, long_term_profile["summary"]),
                     subagents=subagents,
                     checkpointer=checkpointer,
                 )
@@ -222,31 +254,104 @@ class PatientMainAgent(RoleMainAgent):
                     result = await graph.ainvoke(request_state, config=config)
                 else:
                     streamed_text = False
+                    model_runs: dict[str, dict[str, Any]] = {}
+                    active_subagent_name = ""
+
+                    def set_trace(run_id: str, namespace: str, status: str, *, first_output: bool = False) -> None:
+                        if on_activity is None:
+                            return
+                        agent_name = self._trace_agent_name(namespace, active_subagent_name)
+                        details = model_runs.setdefault(
+                            run_id, {"first_output_ms": None, "started_at": time.perf_counter()}
+                        )
+                        if first_output and details["first_output_ms"] is None:
+                            details["first_output_ms"] = round(
+                                (time.perf_counter() - details["started_at"]) * 1000
+                            )
+                        on_activity({
+                            "id": run_id,
+                            "agent": agent_name,
+                            "model": context.get("_model_name", model_name),
+                            "status": status,
+                            "first_output_ms": details["first_output_ms"],
+                            "updated_at": time.time(),
+                        })
+
                     async for event in graph.astream_events(request_state, config=config, version="v2"):
                         metadata = event.get("metadata", {})
                         namespace = metadata.get("langgraph_checkpoint_ns", "")
                         event_name = event.get("event")
+                        event_run_id = str(event.get("run_id") or f"{event_name}-{time.time_ns()}")
                         if not namespace or "|" not in namespace:
                             if event_name == "on_chat_model_start":
                                 update_state("正在理解和整理答复")
+                                estimated = self._estimate_model_input_tokens(event.get("data", {}).get("input"))
+                                if estimated:
+                                    model_context["estimated_input_tokens"] = estimated
+                                    update_state(current_activity, current_todos)
+                                model_runs[event_run_id] = {
+                                    "first_output_ms": None,
+                                    "started_at": time.perf_counter(),
+                                }
+                                set_trace(event_run_id, namespace, "正在调用主模型")
                             elif event_name == "on_tool_start":
                                 tool_name = event.get("name", "")
+                                tool_input = event.get("data", {}).get("input", {})
+                                if tool_name == "task" and isinstance(tool_input, dict):
+                                    active_subagent_name = str(tool_input.get("subagent_type", ""))
                                 if tool_name == "write_todos":
-                                    current_todos = self._agui_todos_from_tool_input(
-                                        event.get("data", {}).get("input", {})
-                                    )
+                                    current_todos = self._agui_todos_from_tool_input(tool_input)
                                     update_state("正在更新处理计划", current_todos)
                                 else:
                                     update_state(self._agui_activity_for_tool(tool_name))
+                                set_trace(event_run_id, namespace, f"正在运行 {tool_name}")
+                            elif event_name == "on_tool_end":
+                                set_trace(event_run_id, namespace, f"{event.get('name', '工具')} 已完成")
+                                if event.get("name") == "task":
+                                    active_subagent_name = ""
+                            elif event_name in {"on_chat_model_end", "on_chain_end"}:
+                                if event_run_id in model_runs:
+                                    if model_runs[event_run_id]["first_output_ms"] is None:
+                                        set_trace(event_run_id, namespace, "模型已完成（服务未提供流式首 token）")
+                                    else:
+                                        set_trace(event_run_id, namespace, "模型本次生成完成")
+                        elif event_name == "on_chat_model_start":
+                            model_runs[event_run_id] = {
+                                "first_output_ms": None,
+                                "started_at": time.perf_counter(),
+                            }
+                            set_trace(event_run_id, namespace, "专科 Agent 正在调用模型")
+                        elif event_name == "on_tool_start":
+                            set_trace(event_run_id, namespace, f"专科 Agent 正在运行 {event.get('name', '工具')}")
+                        elif event_name == "on_tool_end":
+                            set_trace(event_run_id, namespace, f"{event.get('name', '工具')} 已完成")
+                        elif event_name in {"on_chat_model_end", "on_chain_end"}:
+                            if event_run_id in model_runs:
+                                if model_runs[event_run_id]["first_output_ms"] is None:
+                                    set_trace(event_run_id, namespace, "模型已完成（服务未提供流式首 token）")
+                                else:
+                                    set_trace(event_run_id, namespace, "模型本次生成完成")
                         if (
                             event_name == "on_chat_model_stream"
-                            and (not namespace or "|" not in namespace)
                         ):
                             chunk = event.get("data", {}).get("chunk")
+                            if event_run_id not in model_runs:
+                                set_trace(event_run_id, namespace, "模型开始返回首个流式片段", first_output=True)
+                            elif model_runs[event_run_id]["first_output_ms"] is None:
+                                set_trace(event_run_id, namespace, "模型开始返回首个流式片段", first_output=True)
                             content = getattr(chunk, "content", "")
-                            if isinstance(content, str) and content:
-                                streamed_text = True
-                                on_delta(content)
+                            if not namespace or "|" not in namespace:
+                                if isinstance(content, str) and content:
+                                    streamed_text = True
+                                    on_delta(content)
+                                elif isinstance(content, list):
+                                    visible = "".join(
+                                        str(part.get("text", "")) for part in content
+                                        if isinstance(part, dict) and part.get("type") == "text"
+                                    )
+                                    if visible:
+                                        streamed_text = True
+                                        on_delta(visible)
                     state = await graph.aget_state(config)
                     result = dict(state.values)
                     interrupts = [interrupt for task in state.tasks for interrupt in task.interrupts]
@@ -275,17 +380,55 @@ class PatientMainAgent(RoleMainAgent):
         return f"patient:{patient_id}:{supplied}"
 
     @staticmethod
+    def _trace_agent_name(namespace: str, active_subagent_name: str = "") -> str:
+        """从 LangGraph 子图命名空间里取专科 Agent 名，不把运行 ID 发给页面。"""
+        if not namespace or "|" not in namespace:
+            return "patient"
+        match = re.search(r"(?:^|[|:])task:([^|:]+)", namespace)
+        if match:
+            return match.group(1).replace("_", " ")
+        return active_subagent_name.replace("_", " ") if active_subagent_name else "patient"
+
+    @staticmethod
     def _public_context(context: dict[str, Any]) -> dict[str, Any]:
-        private_keys = {"approvePendingWrite", "memoryConsent", "memoryPreference", "conversationId", "_task_key", "continueAfterInterrupt", "_agui_resume"}
+        private_keys = {
+            "approvePendingWrite", "memoryConsent", "memoryPreference", "conversationId",
+            "_task_key", "continueAfterInterrupt", "_agui_resume", "_model_id",
+            "_model_name", "_model_context_window", "_model_max_output_tokens",
+            "_model_input_budget",
+        }
         return {key: value for key, value in context.items() if key not in private_keys}
 
     @staticmethod
-    def _prompt_with_context(recalled: list[dict[str, str]]) -> str:
+    def _prompt_with_context(recalled: list[dict[str, str]], long_term_profile: str = "") -> str:
         text = PATIENT_PROMPT
+        text += "\n\n当前患者长期记忆摘要（每轮更新，过期和低权重记忆不放入此处）：\n" + (
+            long_term_profile or "暂无已确认的长期偏好或服务安排。"
+        )
         if recalled:
             text += "\n\n以下是同一合成患者此前对话的语义检索片段，只作上下文参考；与当前请求冲突时优先按当前请求处理：\n"
             text += json.dumps(recalled, ensure_ascii=False)
         return text
+
+    @staticmethod
+    def _estimate_model_input_tokens(model_input: Any) -> int:
+        """从 LangChain 即将送出的消息估算输入占用，供前端显示趋势。"""
+        if model_input is None:
+            return 0
+        from langchain.agents.middleware.summarization import count_tokens_approximately
+
+        messages = model_input.get("messages") if isinstance(model_input, dict) else model_input
+        if not isinstance(messages, (list, tuple)):
+            return 0
+        # ChatModel 的回调可能把单次调用包成一层 batch 列表。
+        if len(messages) == 1 and isinstance(messages[0], list):
+            messages = messages[0]
+        tools = model_input.get("tools") if isinstance(model_input, dict) else None
+        try:
+            return count_tokens_approximately(messages, tools=tools)
+        except (TypeError, ValueError, NotImplementedError):
+            logging.warning("无法估算本轮模型输入 token，继续运行并在页面显示窗口上限。")
+            return 0
 
     @staticmethod
     def _memory_enabled(context: dict[str, Any], message: str = "") -> bool:

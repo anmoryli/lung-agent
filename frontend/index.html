@@ -41,11 +41,25 @@
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #d2a24e; }
     .dot.online { background: #4e9a72; box-shadow: 0 0 0 3px #4e9a721a; }
     .icon-button { height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font-size: 12px; }
-    .agent-progress { margin: 14px clamp(18px, 9vw, 130px) 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 13px; background: #fffefa; color: #49635a; font-size: 12px; }
+    .model-bar { min-height: 52px; display: flex; align-items: center; gap: 13px; padding: 7px clamp(20px, 5vw, 70px); border-bottom: 1px solid var(--line); background: #f2f5ef; }
+    .model-bar label { display: flex; align-items: center; gap: 8px; color: #68766e; font-size: 11px; white-space: nowrap; }
+    .model-select { min-width: 205px; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fffefa; font-size: 12px; }
+    .model-context { color: #68766e; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-progress { position: sticky; top: 0; z-index: 3; max-width: 760px; margin: 0 auto 23px; padding: 12px 14px; border: 1px solid #d9e2d9; border-radius: 13px; background: #f9fcf8f5; color: #49635a; font-size: 12px; box-shadow: 0 8px 20px #2236270d; backdrop-filter: blur(10px); }
     .agent-progress[hidden] { display: none; }
     .agent-progress-title { font-weight: 650; }
     .agent-todos { margin: 7px 0 0; padding-left: 20px; color: #6e7973; }
     .agent-todos li { margin: 3px 0; }
+    .agent-timeline { max-height: 136px; margin: 8px 0 0; padding: 0; overflow-y: auto; list-style: none; scrollbar-color: #b9c9bd transparent; }
+    .agent-timeline:empty { display: none; }
+    .agent-timeline li { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 4px; border-top: 1px solid #e7ece5; animation: trace-in .22s ease both; }
+    .agent-timeline .trace-dot { width: 7px; height: 7px; border-radius: 50%; background: #84a494; box-shadow: 0 0 0 3px #84a49420; }
+    .agent-timeline li[data-active="true"] .trace-dot { background: #c0834c; box-shadow: 0 0 0 3px #c0834c20; animation: pulse 1.4s ease infinite; }
+    .trace-main { min-width: 0; }
+    .trace-label { display: block; overflow: hidden; color: #344d43; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .trace-meta { display: block; margin-top: 2px; color: #89958e; font-size: 10px; }
+    .trace-first-token { color: #7b6956; font-size: 10px; white-space: nowrap; }
+    .model-usage { padding: 6px 8px; border-radius: 7px; color: #60746a; background: #edf3ed; font-size: 10px; }
     .agent-todos li[data-status="completed"] { color: #829087; text-decoration: line-through; }
     .conversation { flex: 1; overflow: auto; padding: 36px clamp(18px, 9vw, 130px) 20px; scroll-behavior: smooth; }
     .welcome { max-width: 580px; margin: 10vh auto 0; text-align: center; animation: rise .5s ease both; }
@@ -117,6 +131,8 @@
     .profile-empty, .profile-error { padding: 28px 12px; color: var(--muted); text-align: center; font-size: 13px; }
     @keyframes blink { to { opacity: 0; } }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes trace-in { from { opacity: .5; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 6px #c0834c0c; } }
     @media (max-width: 760px) {
       .app { grid-template-columns: 1fr; }
       aside { display: none; }
@@ -125,7 +141,11 @@
       .title h1 { font-size: 18px; }
       .connection { font-size: 0; }
       .icon-button { padding: 0 9px; }
+      .model-bar { min-height: 48px; padding: 6px 12px; gap: 8px; }
+      .model-select { min-width: 120px; max-width: 46vw; }
+      .model-context { font-size: 10px; }
       .conversation { padding: 28px 15px 14px; }
+      .agent-progress { margin-bottom: 18px; }
       .welcome { margin-top: 8vh; }
       .bubble { max-width: 88%; }
       .composer-wrap { padding: 8px 12px 14px; }
@@ -169,11 +189,19 @@
           <button id="openProfile" class="icon-button" type="button">个人中心</button>
         </div>
       </header>
-      <section id="agentProgress" class="agent-progress" aria-live="polite" hidden>
-        <div id="agentStatus" class="agent-progress-title"></div>
-        <ol id="agentTodos" class="agent-todos"></ol>
-      </section>
+      <div class="model-bar">
+        <label for="modelSelect">当前模型<select id="modelSelect" class="model-select" aria-label="选择当前模型" disabled><option>正在读取模型</option></select></label>
+        <span id="modelContext" class="model-context">正在从模型服务读取上下文窗口…</span>
+      </div>
       <section id="conversation" class="conversation" aria-live="polite" aria-label="聊天记录">
+        <section id="agentProgress" class="agent-progress" aria-live="polite" hidden>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div id="agentStatus" class="agent-progress-title"></div>
+            <div id="modelUsage" class="model-usage"></div>
+          </div>
+          <ol id="agentTimeline" class="agent-timeline" aria-label="Agent 实时运行轨迹"></ol>
+          <ol id="agentTodos" class="agent-todos"></ol>
+        </section>
         <div id="welcome" class="welcome">
           <div class="welcome-icon">✳</div>
           <h2>你好，今天想聊些什么？</h2>

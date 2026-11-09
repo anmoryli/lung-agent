@@ -54,13 +54,14 @@ patient/
 ## 状态和持久化位置
 
 - `AGENT_STORAGE_PATH/patient-checkpoints.sqlite3`：LangGraph 会话 checkpoint，包括消息、TODO 状态和 HITL 暂停点。Docker 默认挂载到 `agent-service/storage/`。
-- `AGENT_STORAGE_PATH/patient-memory-vectors.sqlite3`：BGE 向量索引，包含 `long_term` 记忆和 `archive` 会话归档。
+- `AGENT_STORAGE_PATH/patient-memory-vectors.sqlite3`：长期记忆事实/短摘要、BGE 会话归档向量和召回审计。长期记忆表与向量归档表分开。
+- `AGENT_STORAGE_PATH/patient-sessions.sqlite3`：服务端会话目录与当前调试模型选择、模型能力元数据。
 - `backend/runtime/active_runs.py`：当前 SSE 连接、运行 Future、生成取消标记只在进程内存里；进程重启后不会保留正在生成的运行状态。
 
 迁移单机时，停掉服务后复制整个 `storage/`，在新机器上继续使用同一个 `AGENT_STORAGE_PATH` 和 `threadId`。另需配置模型密钥、FHIR MCP 地址与凭据、模型目录。若只迁移 Agent，不迁移 HAPI 数据库，FHIR 资源留在原服务器；整套环境迁移时还要单独迁移 MCP/HAPI 的数据库卷。当前 SQLite checkpoint 适合单机演示，不适合多副本同时共享写入。
 
-## 当前记忆写入时机
+## 记忆写入与上下文
 
-当前实现没有“每轮自动抽取长期记忆”的步骤：主模型判断用户明确要求记住时才会调用 `save_patient_memory`。每轮成功对话的用户消息和助手回复会另外写入向量库的 `archive` 类别；新请求开始时会先按患者 ID 和当前问题取回 4 条最相近记录，模型还可以按需调用 `search_patient_history` 取回最多 5 条。当前检索只有向量距离排序，没有按有效期淘汰、事实冲突版本、BM25/图谱融合或精排。
+患者明确要求“记住”时，`save_patient_memory` 保存一条带重要度、置信度、来源、证据、有效期和版本关系的非临床事实。每轮开始时更新过期/陈旧状态和权重，维护一段最多 900 字符的长期偏好摘要，并把它放进主 Agent 与专科 Agent 的系统提示词。详细规则见 `docs/architecture/patient-memory-design.md`。
 
-这表示“对话归档”目前也会索引原始对话内容，即使提示词要求长期记忆只记非临床偏好。数据库中的 `kind` 做了分类，但召回查询仍同时检索 `archive` 和 `long_term`。下一步记忆治理应按 `docs/architecture/patient-memory-design.md` 的博客对照说明拆分写入规则、有效期和召回过滤。
+对话归档单独做向量检索，每轮先取 4 条；主 Agent 可以按需再取 5 条。归档不会覆盖长期记忆，也不会直接当作当前事实。模型服务能力清单提供总上下文和最大输出，服务按“总窗口减最大输出”计算保守输入预算，并传给 DeepAgents。当前版本在输入预算的 85% 处摘要旧对话、保留最近 10%，也会在摘要前裁剪较大的旧工具参数；模型超限时还会摘要重试。前端展示模型总窗口、输入预算、摘要线和本轮输入估算。SSE 用 `ACTIVITY_SNAPSHOT` 显示 Agent/模型状态和各模型首个流式片段耗时，只将患者主 Agent 可见文本送到对话消息里。

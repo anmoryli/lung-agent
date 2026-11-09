@@ -9,6 +9,10 @@
     const agentProgress = document.querySelector("#agentProgress");
     const agentStatus = document.querySelector("#agentStatus");
     const agentTodos = document.querySelector("#agentTodos");
+    const agentTimeline = document.querySelector("#agentTimeline");
+    const modelSelect = document.querySelector("#modelSelect");
+    const modelContext = document.querySelector("#modelContext");
+    const modelUsage = document.querySelector("#modelUsage");
     const profileDialog = document.querySelector("#profileDialog");
     const profilePanel = document.querySelector("#profilePanel");
     const profileTabs = document.querySelector("#profileTabs");
@@ -17,6 +21,62 @@
     let sessionCatalog = [];
     let profileData = null;
     let activeProfileTab = "fhir";
+    let availableModels = [];
+
+    function formatTokens(value) {
+      const tokens = Number(value) || 0;
+      if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+      if (tokens >= 10_000) return `${Math.round(tokens / 1_000)}K`;
+      return tokens.toLocaleString();
+    }
+
+    function updateModelContext(model, estimatedInput = 0) {
+      if (!model) return;
+      const windowTokens = Number(model.context_window || model.contextWindow || 0);
+      const inputBudget = Number(model.input_budget_tokens || model.inputBudgetTokens || Math.max(0, windowTokens - (model.max_output_tokens || model.maxOutputTokens || 0)));
+      const maxOutput = Number(model.max_output_tokens || model.maxOutputTokens || 0);
+      const summaryAt = Number(model.summarization_trigger_tokens || model.summarizationTriggerTokens || Math.round(inputBudget * 0.85));
+      modelContext.textContent = `${model.name || model.display_name || model.id || model.model_id} · 总窗口 ${formatTokens(windowTokens)} · 输入预算 ${formatTokens(inputBudget)} · 最大输出 ${formatTokens(maxOutput)}`;
+      modelUsage.textContent = estimatedInput
+        ? `本轮输入估算 ${formatTokens(estimatedInput)} / ${formatTokens(inputBudget)} · 摘要触发线约 ${formatTokens(summaryAt)}`
+        : `总窗口 ${formatTokens(windowTokens)} · 预留输出后输入预算 ${formatTokens(inputBudget)} · 摘要触发线约 ${formatTokens(summaryAt)}`;
+    }
+
+    async function loadModels() {
+      const response = await fetch("/api/v1/agents/patient/models");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "无法读取模型上下文资料");
+      availableModels = Array.isArray(data.models) ? data.models : [];
+      modelSelect.replaceChildren();
+      for (const model of availableModels) {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.name;
+        modelSelect.append(option);
+      }
+      if (data.selected?.model_id) modelSelect.value = data.selected.model_id;
+      modelSelect.disabled = availableModels.length === 0;
+      updateModelContext(data.selected);
+    }
+
+    async function selectModel(modelId) {
+      modelSelect.disabled = true;
+      try {
+        const response = await fetch("/api/v1/agents/patient/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ modelId }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "模型切换失败");
+        updateModelContext(data.selected);
+      } catch (error) {
+        await loadModels().catch(() => {});
+        modelContext.textContent = error.message;
+      } finally {
+        modelSelect.disabled = false;
+      }
+    }
 
     function newId(prefix) {
       return `${prefix}-${crypto.randomUUID()}`;
@@ -35,12 +95,54 @@
         agentTodos.append(item);
       }
       agentTodos.hidden = agentTodos.childElementCount === 0;
+      if (snapshot.model) updateModelContext(snapshot.model, snapshot.model.estimated_input_tokens);
     }
 
     function clearAgentState() {
       agentProgress.hidden = true;
       agentStatus.textContent = "";
       agentTodos.replaceChildren();
+      agentTimeline.replaceChildren();
+      modelUsage.textContent = "";
+    }
+
+    function renderAgentTimeline(content) {
+      const entries = Array.isArray(content?.items) ? content.items : [];
+      const agentNames = {
+        patient: "患者主 Agent",
+        report: "报告 Agent",
+        insurance_cost: "医保与费用 Agent",
+        psychological_support: "心理支持 Agent",
+        exam_order: "检查与医嘱 Agent",
+        transport_companion: "交通与陪同 Agent",
+        symptom_safety_triage: "症状安全分流 Agent",
+        consultation_prep: "问诊准备 Agent",
+        home_care_request: "上门护理申请 Agent",
+      };
+      agentProgress.hidden = false;
+      agentTimeline.replaceChildren();
+      for (const entry of entries.slice().sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))) {
+        const row = document.createElement("li");
+        row.dataset.active = String(!/完成|结束|失败/.test(entry.status || ""));
+        const dot = document.createElement("span");
+        dot.className = "trace-dot";
+        const main = document.createElement("span");
+        main.className = "trace-main";
+        const label = document.createElement("span");
+        label.className = "trace-label";
+        const rawName = (entry.agent || "patient").replaceAll(" ", "_");
+        label.textContent = `${agentNames[rawName] || `专科 Agent · ${entry.agent}`} · ${entry.status || "正在处理"}`;
+        const meta = document.createElement("span");
+        meta.className = "trace-meta";
+        meta.textContent = entry.model || "模型信息不可用";
+        main.append(label, meta);
+        const timing = document.createElement("span");
+        timing.className = "trace-first-token";
+        timing.textContent = entry.first_output_ms == null ? "等待首片段" : `首 token ${entry.first_output_ms} ms`;
+        row.append(dot, main, timing);
+        agentTimeline.append(row);
+      }
+      agentTimeline.scrollTop = 0;
     }
 
     function profileCard(title, value, subtitle = "") {
@@ -83,11 +185,19 @@
       if (tab === "fhir") {
         entries = Object.entries(profileData.fhir || {}).map(([name, value]) => profileCard(name, value));
       } else if (tab === "memory") {
-        entries = (profileData.memories || []).map(item => profileCard(
+        const summary = profileData.memoryProfile || {};
+        entries.push(profileCard(
+          `每轮注入摘要 · revision ${summary.revision || 0}`,
+          summary.summary || "暂无长期记忆摘要",
+          `当前有效 ${summary.active_count || 0} 条 · 本轮纳入 ${summary.included_count || 0} 条`,
+        ));
+        entries.push(...(profileData.memories || []).map(item => profileCard(
           item.kind === "long_term" ? "长期记忆" : "会话归档",
           item.text,
-          `${item.source || "无来源"} · ${item.created_at || ""} · ${item.entry_id || ""}`,
-        ));
+          item.kind === "long_term"
+            ? `${item.category} · ${item.status} · 权重 ${item.weight} · 重要度 ${item.importance}/5 · 置信 ${item.confidence} · ${item.source || "无来源"} · 有效至 ${item.expires_at || "未设过期"} · ${item.entry_id}`
+            : `${item.source || "无来源"} · ${item.created_at || ""} · ${item.entry_id || ""}`,
+        )));
       } else if (tab === "retrieval") {
         entries = (profileData.retrievals || []).map(item => profileCard(
           `查询：${item.query}`,
@@ -364,6 +474,7 @@
       sendButton.disabled = busy;
       input.disabled = busy;
       stopButton.hidden = !busy;
+      modelSelect.disabled = busy || availableModels.length === 0;
       if (!busy) input.focus();
     }
 
@@ -461,6 +572,8 @@
       renderAgentState({ activity: "\u6b63\u5728\u5904\u7406\u8bf7\u6c42", todos: [] });
             } else if (event.type === "STATE_SNAPSHOT") {
               renderAgentState(event.snapshot);
+            } else if (event.type === "ACTIVITY_SNAPSHOT") {
+              renderAgentTimeline(event.content);
             } else if (event.type === "TEXT_MESSAGE_CONTENT") {
               assistant.content += event.delta || "";
               renderMarkdown(rendered.bubble, assistant.content);
@@ -526,6 +639,7 @@
       renderSessionCatalog();
       input.focus();
     });
+    modelSelect.addEventListener("change", () => selectModel(modelSelect.value));
     document.querySelector("#openProfile").addEventListener("click", () => {
       profileDialog.showModal();
       loadProfile();
@@ -543,6 +657,10 @@
     });
     renderHistory();
     initializeSessions().catch(error => console.error("加载服务端会话失败", error));
+    loadModels().catch(error => {
+      modelContext.textContent = error.message;
+      modelSelect.replaceChildren(new Option("模型能力不可用", ""));
+    });
 
     fetch("/health").then(response => {
       if (!response.ok) throw new Error("offline");

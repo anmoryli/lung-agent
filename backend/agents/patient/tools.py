@@ -11,7 +11,7 @@ from backend.agents.patient.registry import PatientAgentRegistry
 def create_patient_tools(
     registry: PatientAgentRegistry,
     search_history: Callable[[str], list[dict]],
-    remember: Callable[[str], None],
+    remember: Callable[..., None],
     memory_enabled: bool = True,
 ) -> list[object]:
     """用 LangChain 的 @tool 注册机制，把发现和记忆检索交给主模型。"""
@@ -32,9 +32,17 @@ def create_patient_tools(
         return json.dumps(search_history(query), ensure_ascii=False)
 
     @tool
-    def save_patient_memory(content: str) -> str:
-        """患者明确说“记住”时，保存非临床偏好或服务安排；直接保存，不再询问同意。"""
-        remember(content)
-        return "已保存到当前合成患者的长期记忆。"
+    def save_patient_memory(
+        content: str,
+        category: str = "preference",
+        importance: int = 3,
+        expires_in_days: int | None = None,
+        supersedes_id: str = "",
+        evidence: str = "",
+        conflicts_with_id: str = "",
+    ) -> str:
+        """保存明确要求记住的非临床事实；可设重要度、有效期、替代关系或未解决冲突。"""
+        remember(content, category, importance, expires_in_days, supersedes_id, evidence, conflicts_with_id)
+        return "已写入独立长期记忆，并更新每轮注入的短摘要。"
 
     return [*tools, search_patient_history, save_patient_memory]

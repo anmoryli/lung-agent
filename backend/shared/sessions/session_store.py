@@ -35,6 +35,16 @@ class PatientSessionStore:
                 "CREATE INDEX IF NOT EXISTS idx_patient_sessions_updated "
                 "ON patient_sessions(patient_id, updated_at DESC)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS patient_model_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    model_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    context_window INTEGER NOT NULL,
+                    max_output_tokens INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
 
     def save(
         self,
@@ -85,6 +95,32 @@ class PatientSessionStore:
         for key in ("messages", "agent_state", "pending_interrupts"):
             result[key] = json.loads(result[key])
         return result
+
+    def get_selected_model(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT model_id, display_name, context_window, max_output_tokens, updated_at "
+                "FROM patient_model_settings WHERE setting_key='patient.default'"
+            ).fetchone()
+        if row is None:
+            return None
+        selected = dict(row)
+        selected["input_budget_tokens"] = selected["context_window"] - selected["max_output_tokens"]
+        return selected
+
+    def set_selected_model(self, model: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO patient_model_settings
+                   (setting_key, model_id, display_name, context_window, max_output_tokens, updated_at)
+                   VALUES ('patient.default', ?, ?, ?, ?, ?)
+                   ON CONFLICT(setting_key) DO UPDATE SET
+                     model_id=excluded.model_id, display_name=excluded.display_name,
+                     context_window=excluded.context_window,
+                     max_output_tokens=excluded.max_output_tokens, updated_at=excluded.updated_at""",
+                (model["id"], model["name"], model["context_window"], model["max_output_tokens"], now),
+            )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database, timeout=10)
