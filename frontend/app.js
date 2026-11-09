@@ -9,9 +9,14 @@
     const agentProgress = document.querySelector("#agentProgress");
     const agentStatus = document.querySelector("#agentStatus");
     const agentTodos = document.querySelector("#agentTodos");
+    const profileDialog = document.querySelector("#profileDialog");
+    const profilePanel = document.querySelector("#profilePanel");
+    const profileTabs = document.querySelector("#profileTabs");
     let state = { threadId: newId("patient-chat"), messages: [], patientId: "demo-patient-0001" };
     let activeController = null;
     let sessionCatalog = [];
+    let profileData = null;
+    let activeProfileTab = "fhir";
 
     function newId(prefix) {
       return `${prefix}-${crypto.randomUUID()}`;
@@ -36,6 +41,96 @@
       agentProgress.hidden = true;
       agentStatus.textContent = "";
       agentTodos.replaceChildren();
+    }
+
+    function profileCard(title, value, subtitle = "") {
+      const card = document.createElement("article");
+      card.className = "profile-card";
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      card.append(heading);
+      if (subtitle) {
+        const meta = document.createElement("p");
+        meta.textContent = subtitle;
+        card.append(meta);
+      }
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "查看完整内容";
+      const pre = document.createElement("pre");
+      pre.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      details.append(summary, pre);
+      card.append(details);
+      return card;
+    }
+
+    function renderProfileTab(tab) {
+      activeProfileTab = tab;
+      profileTabs.replaceChildren();
+      const tabs = [["fhir", "FHIR 资料"], ["memory", "记忆与归档"], ["retrieval", "实际召回"], ["sessions", "会话记录"], ["storage", "存储位置"]];
+      for (const [key, label] of tabs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "profile-tab";
+        button.textContent = label;
+        button.setAttribute("aria-selected", String(key === tab));
+        button.addEventListener("click", () => renderProfileTab(key));
+        profileTabs.append(button);
+      }
+      profilePanel.replaceChildren();
+      if (!profileData) return;
+      let entries = [];
+      if (tab === "fhir") {
+        entries = Object.entries(profileData.fhir || {}).map(([name, value]) => profileCard(name, value));
+      } else if (tab === "memory") {
+        entries = (profileData.memories || []).map(item => profileCard(
+          item.kind === "long_term" ? "长期记忆" : "会话归档",
+          item.text,
+          `${item.source || "无来源"} · ${item.created_at || ""} · ${item.entry_id || ""}`,
+        ));
+      } else if (tab === "retrieval") {
+        entries = (profileData.retrievals || []).map(item => profileCard(
+          `查询：${item.query}`,
+          item.results,
+          `${item.created_at || ""} · 会话 ${item.conversation_id || "未关联"}`,
+        ));
+      } else if (tab === "sessions") {
+        entries = (profileData.sessions || []).map(item => profileCard(
+          item.title || "未命名会话",
+          { messages: item.messages, agent_state: item.agent_state, pending_interrupts: item.pending_interrupts },
+          `${item.status} · ${item.updated_at} · ${item.thread_id}`,
+        ));
+      } else {
+        entries = [profileCard("数据落盘信息", profileData.storage || {})];
+      }
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "profile-empty";
+        empty.textContent = tab === "retrieval" ? "还没有记录到向量召回" : "这个分类目前没有记录";
+        profilePanel.append(empty);
+      } else profilePanel.append(...entries);
+    }
+
+    async function loadProfile() {
+      profilePanel.replaceChildren();
+      const loading = document.createElement("div");
+      loading.className = "profile-empty";
+      loading.textContent = "正在读取患者资料、会话和向量记忆…";
+      profilePanel.append(loading);
+      const id = encodeURIComponent(patientId.value.trim() || "demo-patient-0001");
+      try {
+        const response = await fetch(`/api/v1/agents/patient/profile?patientId=${id}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "读取个人中心失败");
+        profileData = data;
+        document.querySelector("#profileSubtitle").textContent = `${data.patientId} · 演示数据调试视图`;
+        renderProfileTab(activeProfileTab);
+      } catch (error) {
+        const message = document.createElement("div");
+        message.className = "profile-error";
+        message.textContent = error.message;
+        profilePanel.replaceChildren(message);
+      }
     }
 
     function addMessage(role, content) {
@@ -431,6 +526,12 @@
       renderSessionCatalog();
       input.focus();
     });
+    document.querySelector("#openProfile").addEventListener("click", () => {
+      profileDialog.showModal();
+      loadProfile();
+    });
+    document.querySelector("#reloadProfile").addEventListener("click", loadProfile);
+    document.querySelector("#closeProfile").addEventListener("click", () => profileDialog.close());
 
     patientId.value = state.patientId || "demo-patient-0001";
     patientId.addEventListener("change", () => refreshSessionCatalog().catch(error => console.warn("\u5237\u65b0\u4f1a\u8bdd\u5217\u8868\u5931\u8d25", error)));

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 import sqlite3
 import struct
 import threading
@@ -28,7 +29,9 @@ class PatientMemoryVectorStore:
         self._model_lock = threading.Lock()
         self._schema_lock = threading.Lock()
 
-    def search(self, patient_id: str, query: str, limit: int = 5) -> list[dict[str, str]]:
+    def search(
+        self, patient_id: str, query: str, limit: int = 5, conversation_id: str = ""
+    ) -> list[dict[str, Any]]:
         if not query.strip():
             return []
         query_vector = self._embed(QUERY_INSTRUCTION + query)
@@ -39,8 +42,65 @@ class PatientMemoryVectorStore:
                 "AND patient_id = ? ORDER BY distance",
                 (self._pack(query_vector), limit, patient_id),
             ).fetchall()
+            matches = [
+                {
+                    "entry_id": row[0],
+                    "text": row[1],
+                    "source": row[2],
+                    "created_at": row[3],
+                    "kind": row[4],
+                    "score": round(1 - row[5], 4),
+                }
+                for row in rows
+            ]
+            # 保存实际召回结果，调试页可以核对模型本轮看到了什么。
+            connection.execute(
+                "INSERT INTO patient_memory_retrievals "
+                "(patient_id, conversation_id, query, results, created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    patient_id,
+                    conversation_id,
+                    query[:6000],
+                    json.dumps(matches, ensure_ascii=False, separators=(",", ":")),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        return matches
+
+    def list_patient_entries(self, patient_id: str) -> list[dict[str, Any]]:
+        """把患者的记忆和对话归档连同来源信息列出来，供调试页查看。"""
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT entry_id, kind, text, source, created_at "
+                "FROM patient_memory_vectors WHERE patient_id = ? ORDER BY created_at DESC",
+                (patient_id,),
+            ).fetchall()
         return [
-            {"text": row[1], "source": row[2], "created_at": row[3], "kind": row[4], "score": str(round(1 - row[5], 4))}
+            {
+                "entry_id": row[0],
+                "kind": row[1],
+                "text": row[2],
+                "source": row[3],
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
+    def list_retrievals(self, patient_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT conversation_id, query, results, created_at "
+                "FROM patient_memory_retrievals WHERE patient_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (patient_id, limit),
+            ).fetchall()
+        return [
+            {
+                "conversation_id": row[0],
+                "query": row[1],
+                "results": json.loads(row[2]),
+                "created_at": row[3],
+            }
             for row in rows
         ]
 
@@ -115,6 +175,16 @@ class PatientMemoryVectorStore:
                     "entry_id TEXT, patient_id TEXT, kind TEXT, "
                     f"embedding FLOAT[{MODEL_DIMENSIONS}] distance_metric=cosine, "
                     "+text TEXT, +source TEXT, +created_at TEXT)"
+                )
+                connection.execute(
+                    "CREATE TABLE IF NOT EXISTS patient_memory_retrievals ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "patient_id TEXT NOT NULL, conversation_id TEXT NOT NULL, "
+                    "query TEXT NOT NULL, results TEXT NOT NULL, created_at TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_patient_memory_retrievals_patient "
+                    "ON patient_memory_retrievals(patient_id, id DESC)"
                 )
             yield connection
             connection.commit()

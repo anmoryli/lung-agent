@@ -35,11 +35,77 @@ from backend.integrations.mcp.patient_fhir import patient_id_from_context
 from backend.shared.sessions.session_store import PatientSessionStore
 from backend.shared.tasking.idempotency_store import IdempotencyConflict
 from backend.runtime.active_runs import active_runs
-from backend.runtime.async_runner import submit_async
+from backend.runtime.async_runner import run_async, submit_async
 
 
 gateway = Gateway()
 session_store = PatientSessionStore()
+
+
+async def _load_patient_profile(patient_id: str, memory_store: Any) -> dict[str, Any]:
+    """从 FHIR 和本地 SQLite 读取合成患者调试页需要的原始记录。"""
+    from backend.integrations.mcp.patient_fhir import mcp_transport
+    from langchain.mcp import MCPAdapter
+
+    async with MCPAdapter(mcp_transport()) as adapter:
+        available = {tool.name: tool for tool in await adapter.list_tools()}
+        fhir: dict[str, Any] = {}
+        for name in (
+            "get_patient_summary", "search_encounters", "search_documents",
+            "search_conditions", "search_observations", "search_reports",
+            "search_service_requests", "search_medication_requests", "search_appointments",
+            "search_care_plans", "search_tasks", "search_allergies", "search_procedures",
+            "search_coverages", "search_related_people", "search_communications",
+            "search_consents", "search_specimens",
+        ):
+            tool = available.get(name)
+            if tool is None:
+                continue
+            result = await tool.ainvoke({"patient_id": patient_id})
+            fhir[name] = _decode_mcp_result(result)
+
+    sessions = []
+    for summary in session_store.list_for_patient(patient_id):
+        session = session_store.get(summary["thread_id"], patient_id)
+        if session:
+            sessions.append(session)
+    return {
+        "patientId": patient_id,
+        "fhir": fhir,
+        "memories": memory_store.list_patient_entries(patient_id),
+        "retrievals": memory_store.list_retrievals(patient_id, limit=100),
+        "sessions": sessions,
+        "storage": {
+            "memoryDatabase": str(memory_store.database),
+            "embeddingModel": "BAAI/bge-small-zh-v1.5",
+            "embeddingDimensions": 512,
+            "vectorTable": "patient_memory_vectors (sqlite-vec)",
+            "sessionDatabase": str(session_store.database),
+            "checkpointDatabase": str(Path(os.getenv("AGENT_STORAGE_PATH", "./storage")) / "patient-checkpoints.sqlite3"),
+        },
+    }
+
+
+def _decode_mcp_result(result: Any) -> Any:
+    """将 MCP 返回的文本 JSON 转回普通对象，其他结果按原样展示。"""
+    if isinstance(result, dict):
+        return result
+    content = getattr(result, "content", None)
+    if content is None and isinstance(result, list):
+        content = result
+    if isinstance(content, list):
+        values = []
+        for item in content:
+            text = getattr(item, "text", None)
+            if text is None and isinstance(item, dict):
+                text = item.get("text")
+            if isinstance(text, str):
+                try:
+                    values.append(json.loads(text))
+                except json.JSONDecodeError:
+                    values.append(text)
+        return values[0] if len(values) == 1 else values
+    return result
 
 
 def _normalize_messages(messages: Any) -> list[dict[str, Any]]:
@@ -87,6 +153,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if request_path == "/api/v1/agents/patient/sessions":
             self._send_patient_sessions(parse_qs(parsed.query).get("patientId", [""])[0])
             return
+        if request_path == "/api/v1/agents/patient/profile":
+            self._send_patient_profile(parse_qs(parsed.query).get("patientId", [""])[0])
+            return
         session_match = re.fullmatch(r"/api/v1/agents/patient/sessions/([A-Za-z0-9_.:-]{1,128})", request_path)
         if session_match:
             self._send_patient_session(session_match.group(1), parse_qs(parsed.query).get("patientId", [""])[0])
@@ -124,7 +193,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         path = urlparse(self.path).path
-        if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import"} and not path.startswith(
+        if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import", "/api/v1/agents/patient/profile"} and not path.startswith(
             ("/api/v1/agents/patient/runs/", "/api/v1/agents/patient/sessions")
         ):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "找不到这个地址。"})
@@ -201,6 +270,21 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "没有找到这个会话。"})
             return
         self._send_json(HTTPStatus.OK, {"session": session})
+
+    def _send_patient_profile(self, requested_patient_id: str) -> None:
+        """仅为演示患者读取资料、持久化记忆和真实召回记录。"""
+        try:
+            patient_id = patient_id_from_context({"patient_id": requested_patient_id})
+            agent = gateway.get_agent("patient")
+            profile = run_async(_load_patient_profile(patient_id, agent.memory_store))
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        except Exception:
+            logging.exception("读取患者调试资料失败")
+            self._send_json(HTTPStatus.BAD_GATEWAY, {"error": "读取患者资料失败，请检查 FHIR MCP 服务和服务日志。"})
+            return
+        self._send_json(HTTPStatus.OK, profile)
 
     def _import_session(self) -> None:
         """把旧版页面里尚未进入服务端的聊天记录迁入会话目录。"""

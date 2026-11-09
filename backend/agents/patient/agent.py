@@ -141,8 +141,10 @@ class PatientMainAgent(RoleMainAgent):
             await asyncio.to_thread(memory.delete_patient, patient_id)
         elif on_state is not None:
             update_state("正在查找相关历史记忆")
-        recalled = await asyncio.to_thread(memory.search, patient_id, message, 4) if memory_enabled else []
-        memory_tool = lambda query: memory.search(patient_id, query, limit=5)
+        recalled = await asyncio.to_thread(
+            memory.search, patient_id, message, 4, thread_id
+        ) if memory_enabled else []
+        memory_tool = lambda query: memory.search(patient_id, query, limit=5, conversation_id=thread_id)
         remember = lambda content: memory.remember(patient_id, content, thread_id)
 
         update_state("正在连接患者资料")

@@ -99,6 +99,22 @@
     .session-item:hover, .session-item[aria-current="true"] { border-color: var(--line); background: var(--panel); }
     .session-item-title { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
     .session-item-meta { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    dialog.profile-dialog { width: min(1050px, 94vw); max-width: none; max-height: 88vh; padding: 0; border: 1px solid var(--line); border-radius: 18px; color: var(--ink); background: var(--panel); box-shadow: 0 24px 90px #14271f40; }
+    dialog.profile-dialog::backdrop { background: #14231dcc; backdrop-filter: blur(3px); }
+    .profile-head { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 18px 22px; border-bottom: 1px solid var(--line); background: #fffefa; }
+    .profile-head h2 { margin: 0; font: 500 20px Georgia, "Microsoft YaHei", serif; }
+    .profile-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .profile-content { padding: 18px 22px 26px; overflow: auto; }
+    .profile-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+    .profile-tab { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--ink); font-size: 12px; }
+    .profile-tab[aria-selected="true"] { border-color: var(--green); color: white; background: var(--green); }
+    .profile-panel { display: grid; gap: 12px; }
+    .profile-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .profile-card h3 { margin: 0 0 8px; font-size: 14px; }
+    .profile-card p, .profile-card summary { margin: 0; color: #57675f; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+    .profile-card details { margin-top: 8px; }
+    .profile-card pre { max-height: 420px; overflow: auto; padding: 12px; border-radius: 9px; background: #f3f4ef; font: 11px/1.6 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .profile-empty, .profile-error { padding: 28px 12px; color: var(--muted); text-align: center; font-size: 13px; }
     @keyframes blink { to { opacity: 0; } }
     @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 760px) {
@@ -114,6 +130,8 @@
       .bubble { max-width: 88%; }
       .composer-wrap { padding: 8px 12px 14px; }
       .hint { max-width: 45%; line-height: 1.4; }
+      dialog.profile-dialog { width: 100vw; max-height: 94vh; border-radius: 16px 16px 0 0; }
+      .profile-head, .profile-content { padding-left: 15px; padding-right: 15px; }
     }
   </style>
 </head>
@@ -148,6 +166,7 @@
         <div class="top-actions">
           <span class="connection"><i id="healthDot" class="dot"></i><span id="healthText">正在连接</span></span>
           <button id="newChat" class="icon-button" type="button" title="开始新会话">＋ <span>新会话</span></button>
+          <button id="openProfile" class="icon-button" type="button">个人中心</button>
         </div>
       </header>
       <section id="agentProgress" class="agent-progress" aria-live="polite" hidden>
@@ -182,6 +201,16 @@
       </div>
     </main>
   </div>
+  <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileTitle">
+    <div class="profile-head">
+      <div><h2 id="profileTitle">合成患者个人中心</h2><p id="profileSubtitle">FHIR 资料、会话、记忆与实际召回记录</p></div>
+      <div class="top-actions"><button id="reloadProfile" class="icon-button" type="button">重新读取</button><button id="closeProfile" class="icon-button" type="button">关闭</button></div>
+    </div>
+    <div class="profile-content">
+      <nav id="profileTabs" class="profile-tabs" aria-label="个人中心分类"></nav>
+      <section id="profilePanel" class="profile-panel" aria-live="polite"><div class="profile-empty">点击“个人中心”读取演示患者资料</div></section>
+    </div>
+  </dialog>
   <script src="/app.js" defer></script>
 </body>
 </html>
