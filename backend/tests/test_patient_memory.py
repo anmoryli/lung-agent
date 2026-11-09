@@ -114,6 +114,43 @@ class PatientLongTermMemoryTests(unittest.TestCase):
         self.assertFalse(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", invented))
         self.assertTrue(PatientMemoryExtractionWorker._quote_is_acceptable("我更喜欢短信提醒", explicit))
 
+    def test_vector_recall_deduplicates_repeated_archive_text(self) -> None:
+        # 固定测试向量，只验证 sqlite-vec 的候选结果是否会按文本合并。
+        self.store._embed = lambda _text: [1.0] + [0.0] * 511
+        for conversation, task, text in (
+            ("conversation-1", "turn-1", "请帮我查看最近的一份检查报告"),
+            ("conversation-2", "turn-2", "请帮我查看最近的一份检查报告"),
+            ("conversation-3", "turn-3", "请帮我查看最近一份检查报告"),
+            ("conversation-4", "turn-4", "我想了解检查报告"),
+        ):
+            self.store.archive(self.patient_id, conversation, task, "user", text)
+        self.store.archive(
+            self.patient_id, "conversation-5", "turn-5", "assistant",
+            "报告 demo-report-laboratory-0001 于 11 月 5 日出具，结论原文“血常规数据已回传”，我不会估算具体数值。",
+        )
+        self.store.archive(
+            self.patient_id, "conversation-6", "turn-6", "assistant",
+            "报告 demo-report-laboratory-0001 于 2026 年 11 月 5 日出具，结论原文“血常规数据已回传”。",
+        )
+        self.store.archive(
+            self.patient_id, "conversation-7", "turn-7", "assistant",
+            "报告 demo-report-laboratory-0001 于 11 月 5 日出具，检验值为 5.6。",
+        )
+
+        results = self.store.search(self.patient_id, "检查报告", limit=8)
+        result_texts = {item["text"] for item in results}
+        self.assertEqual(
+            len(result_texts & {"请帮我查看最近的一份检查报告", "请帮我查看最近一份检查报告"}), 1
+        )
+        self.assertIn("我想了解检查报告", result_texts)
+        self.assertEqual(
+            len(result_texts & {
+                "报告 demo-report-laboratory-0001 于 11 月 5 日出具，结论原文“血常规数据已回传”，我不会估算具体数值。",
+                "报告 demo-report-laboratory-0001 于 2026 年 11 月 5 日出具，结论原文“血常规数据已回传”。",
+            }), 1,
+        )
+        self.assertIn("报告 demo-report-laboratory-0001 于 11 月 5 日出具，检验值为 5.6。", result_texts)
+
 
 if __name__ == "__main__":
     unittest.main()

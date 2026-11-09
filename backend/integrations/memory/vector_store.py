@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import re
 import sqlite3
 import struct
 import threading
@@ -39,27 +40,46 @@ class PatientMemoryVectorStore:
     def search(
         self, patient_id: str, query: str, limit: int = 5, conversation_id: str = ""
     ) -> list[dict[str, Any]]:
-        if not query.strip():
+        if not query.strip() or limit <= 0:
             return []
         query_vector = self._embed(QUERY_INSTRUCTION + query)
+        candidate_limit = min(max(limit * 8, limit), 100)
         with self._connection() as connection:
             rows = connection.execute(
-                "SELECT entry_id, text, source, created_at, kind, distance "
+                "SELECT entry_id, text, source, created_at, kind, distance, embedding "
                 "FROM patient_memory_vectors WHERE embedding MATCH ? AND k = ? "
                 "AND patient_id = ? AND kind = 'archive' ORDER BY distance",
-                (self._pack(query_vector), limit, patient_id),
+                (self._pack(query_vector), candidate_limit, patient_id),
             ).fetchall()
-            matches = [
-                {
+            matches = []
+            seen_texts: set[str] = set()
+            retained = []
+            for row in rows:
+                # 每次对话都要归档，但同一句话多次出现时，检索上下文只留一份。
+                normalized_text = re.sub(r"\s+", " ", row[1]).strip().casefold()
+                if row[0].endswith(":user"):
+                    # 去掉口语问题里的虚词“的”，例如“最近的一份”和“最近一份”。
+                    normalized_text = normalized_text.replace("的", "")
+                if normalized_text in seen_texts:
+                    continue
+                vector = struct.unpack(f"{MODEL_DIMENSIONS}f", row[6])
+                if any(
+                    self._same_report_answer(row[0], row[1], vector, previous)
+                    for previous in retained
+                ):
+                    continue
+                seen_texts.add(normalized_text)
+                retained.append({"entry_id": row[0], "text": row[1], "vector": vector})
+                matches.append({
                     "entry_id": row[0],
                     "text": row[1],
                     "source": row[2],
                     "created_at": row[3],
                     "kind": row[4],
                     "score": round(1 - row[5], 4),
-                }
-                for row in rows
-            ]
+                })
+                if len(matches) == limit:
+                    break
             # 保存实际召回结果，调试页可以核对模型本轮看到了什么。
             connection.execute(
                 "INSERT INTO patient_memory_retrievals "
@@ -73,6 +93,63 @@ class PatientMemoryVectorStore:
                 ),
             )
         return matches
+
+    @staticmethod
+    def _same_report_answer(
+        entry_id: str, text: str, vector: tuple[float, ...], previous: dict[str, Any]
+    ) -> bool:
+        """只合并同一份报告的近似助手答复，数值或风险词不同就保留两条。"""
+        if not entry_id.endswith(":assistant") or not previous["entry_id"].endswith(":assistant"):
+            return False
+        report_ids = {
+            value.casefold() for value in re.findall(r"(?:demo-)?report[-_][\w-]+", text, flags=re.IGNORECASE)
+        }
+        previous_ids = {
+            value.casefold()
+            for value in re.findall(r"(?:demo-)?report[-_][\w-]+", previous["text"], flags=re.IGNORECASE)
+        }
+        if not report_ids.intersection(previous_ids):
+            return False
+        if PatientMemoryVectorStore._number_signature(text) != PatientMemoryVectorStore._number_signature(
+            previous["text"]
+        ):
+            return False
+
+        def polarity(source: str) -> tuple[bool, ...]:
+            normalized = source.replace("没法", "无法").replace("不能", "无法").replace("查不到", "无法")
+            markers = ("不", "没有", "无法", "未", "异常", "正常", "阳性", "阴性", "升高", "降低", "过敏")
+            return tuple(marker in normalized for marker in markers)
+
+        quoted_claims = lambda source: {
+            re.sub(r"\s+", " ", value).strip().casefold()
+            for value in re.findall(r"[“\"]([^”\"]{8,})[”\"]", source)
+        }
+        current_claims = quoted_claims(text)
+        previous_claims = quoted_claims(previous["text"])
+        if current_claims and previous_claims:
+            if not current_claims.intersection(previous_claims):
+                return False
+        elif polarity(text) != polarity(previous["text"]):
+            return False
+        left = vector
+        right = previous["vector"]
+        dot = sum(a * b for a, b in zip(left, right))
+        left_norm = sum(value * value for value in left) ** 0.5
+        right_norm = sum(value * value for value in right) ** 0.5
+        similarity = dot / (left_norm * right_norm) if left_norm and right_norm else 0.0
+        return similarity >= 0.90
+
+    @staticmethod
+    def _number_signature(text: str) -> tuple[str, ...]:
+        # 年份有时一个答复省略，日期和报告数值仍要一致才合并。
+        without_list_numbers = re.sub(r"(?m)^\s*\d+[.、)]\s*", "", text)
+        without_year = re.sub(
+            r"(?<!\d)(?:19|20)\d{2}(?=(?:\s*年|\s*[-/.]\s*\d{1,2}\s*[-/.]))",
+            "",
+            without_list_numbers,
+        )
+        numbers = re.findall(r"\d+(?:\.\d+)?", without_year)
+        return tuple(sorted(str(int(value)) if value.isdigit() else value for value in numbers))
 
     def list_patient_entries(self, patient_id: str) -> list[dict[str, Any]]:
         """把独立的长期记忆和向量归档放在一份列表中供调试页查看。"""
