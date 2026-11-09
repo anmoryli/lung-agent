@@ -1,27 +1,23 @@
-# Agent Service 架构骨架
+﻿# Agent Service 架构骨架
 
 ## 请求路径
 
-```text
-HTTP API → Gateway → 角色主 Agent → 子 Agent → 共享合同/外部适配器
-                 ↑                                  ↓
-                 └──────── ServiceCase / taskKey ───┘
-```
+    HTTP 请求 → API v1 → Gateway → 角色主 Agent → 回复
+                              ↘ SQLite taskKey 缓存
 
 ## 目录职责
 
-- `backend/api` 只定义对外接口，不自行选择或调用子 Agent。
-- `backend/gateway` 是唯一的意图路由和任务编排入口。
-- `backend/agents/{patient,doctor,management,nursing}` 对应四个角色主 Agent；各自子目录对应一个窄职责子 Agent。
-- `backend/shared` 保存 `taskKey`、`ServiceCase`、权限、审计和跨角色数据合同。
-- `backend/runtime` 执行 Gateway 下发的 Agent 任务，不建立 Agent 之间的隐式调度。
-- `backend/integrations` 隔离 FHIR、MCP、BM25、向量和图检索实现。
+- backend/api/v1/handler.py 接收请求、校验字段并返回 JSON。
+- backend/gateway/orchestration/gateway.py 是唯一的角色路由和任务编排入口。
+- backend/agents/{patient,doctor,management,nursing}/agent.py 分别创建四个 DeepAgents 主 Agent。
+- backend/agents/base.py 统一创建 DeepAgents 图并整理模型回复。
+- backend/shared/tasking/idempotency_store.py 按稳定 taskKey 保存回复，重试时不重复调用模型。
+- backend/integrations 预留 FHIR、MCP、BM25、向量和图检索实现。
 
-## 关键边界
+## 当前边界
 
-1. 主 Agent 和子 Agent 都通过 Gateway 的任务上下文运行；子 Agent 不能直接改写其他角色任务。
-2. 同一业务动作使用稳定 `taskKey`，跨角色状态落在同一个 `ServiceCase`。
-3. AI 仅负责抽取、摘要、检索和草稿；医疗判断、外部写回、支付/权益等副作用必须经过相应确认。
-4. 患者端只接收可理解、可执行的结果，不暴露内部风险等级、Agent 调用和 GraphRAG 证据链。
-
-本目录仅为后续服务实现预留结构，当前没有运行时、API 或模型代码。
+1. 主 Agent 只处理 Gateway 交给它的单次请求，不自行调用子 Agent。
+2. 相同 taskKey 和相同请求复用首次回复；相同 key 配不同请求会被拒绝。
+3. 患者 Agent 不诊断、不改医嘱；医生 Agent 只生成辅助摘要和草稿，医疗判断由医生确认。
+4. 管理 Agent 和护理 Agent 只整理信息与草稿，不代表外部操作已经执行。
+5. 当前没有登录鉴权、FHIR/MCP 工具、ServiceCase 持久化和子 Agent 调度；本地运行时使用合成数据。

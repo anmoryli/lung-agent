@@ -1,0 +1,15 @@
+﻿services:
+  agent-service:
+    build: .
+    ports:
+      - "127.0.0.1:8010:8010"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPAGENTS_MODEL: ${DEEPAGENTS_MODEL:-openai:gpt-4.1-mini}
+      AGENT_BIND_HOST: 0.0.0.0
+      AGENT_SERVICE_PORT: 8010
+      AGENT_STORAGE_PATH: /app/storage
+    volumes:
+      - ./storage:/app/storage
+    restart: unless-stopped
