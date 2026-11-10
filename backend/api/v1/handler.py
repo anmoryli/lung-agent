@@ -694,10 +694,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("上传请求不能为空，且不能超过 20 MB。")
             content_type = self.headers.get("Content-Type", "")
             files = parse_multipart(content_type, self.rfile.read(content_length))
-            result = extract_files(files)
         except (ValueError, TypeError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
+
+        try:
+            result = extract_files(files)
         except Exception as error:
             logging.exception("解析用户上传文件失败")
             self._send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": f"文件解析失败：{error}"})

@@ -65,8 +65,6 @@ def extract_files(files: list[dict[str, Any]]) -> dict[str, Any]:
         if clipped:
             chunks.append(f"[文件名：{item['name']}]\n{clipped}")
         remaining -= take
-    if remaining <= 0:
-        truncated = True
     return {"files": results, "combinedText": "\n\n".join(chunks), "truncated": truncated}
 
 

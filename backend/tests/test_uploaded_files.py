@@ -61,10 +61,12 @@ class UploadedFileTests(unittest.TestCase):
         files = [self._file(f"notes-{index}.txt", ".txt", b"x" * 4_000) for index in range(5)]
 
         result = extract_files(files)
+        exact_limit = extract_files([self._file("notes.txt", ".txt", b"x" * MAX_EXTRACTED_CHARS)])
 
         self.assertEqual(sum(len(item["text"]) for item in result["files"]), MAX_EXTRACTED_CHARS)
         self.assertTrue(result["truncated"])
         self.assertTrue(result["files"][-1]["truncated"])
+        self.assertFalse(exact_limit["truncated"])
 
     def test_multipart_file_is_extracted_and_unsupported_suffix_is_rejected(self) -> None:
         message = EmailMessage(policy=SMTP)

@@ -117,6 +117,8 @@ curl.exe -N "http://localhost:8010/api/v1/agents/patient/ag-ui" -H "Content-Type
 
 聊天输入框可上传 PDF、DOCX、XLSX、XLS、PNG、JPEG、TXT 和 CSV。识别接口是 `POST /api/v1/agents/patient/files/extract`，使用 `multipart/form-data`，一次最多 5 个文件，请求总大小不超过 20 MB、单个文件不超过 15 MB。识别文本最多保留 12000 字；PDF 按页提取并把表格排成 Markdown，扫描 PDF 和图片使用简体中文与英文 OCR，Word 表格和电子表格工作表也会保留边界。
 
+完整请求与响应格式、`curl` 示例和错误码见[文件提取接口文档](docs/api/file-upload.md)。
+
 前端发送聊天时，会把识别文本标成“用户上传文件的内容”，附在当前问题后，并保存到该会话。原始文件不会单独存到服务器。Docker 镜像会安装 Tesseract 和中英文语言包；本地开发若需要图片或扫描 PDF OCR，也要安装 Tesseract 及 `chi_sim`、`eng` 语言数据。
 
 这套确认卡目前用于本地合成患者演示。当前入口没有用户登录鉴权，不能用它处理真实患者资料或真实预约。
