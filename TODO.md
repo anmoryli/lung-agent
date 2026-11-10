@@ -1,6 +1,6 @@
 # Agent Service TODO
 
-## Harness 工具输入与结果校验
+## 工具输入与结果校验
 
 - [x] 保留 MCP 工具参数规则，并在调用远端工具前用 JSON Schema 校验。
 - [x] 对 FHIR 搜索返回逐条核对资源类型和患者归属；格式不符时停止传递结果。

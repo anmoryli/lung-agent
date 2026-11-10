@@ -7,7 +7,7 @@
 ## 执行项
 
 - [x] 查 AG-UI 官方 Python SDK、RunAgentInput、SSE 编码、运行中断和恢复合同。
-- [x] 查 DeepAgents 官方 harness 与委派方式，继续用框架原生 `task` 工具执行子 Agent。
+- [x] 查 DeepAgents 官方委派方式，用内置 `task` 工具运行子 Agent。
 - [x] 按现有目录分层整理，把每个患者专科定义放回自己的专科目录。
 - [x] 增加患者专科注册/发现中心，每轮请求读取注册表。
 - [x] 用 LangChain `@tool` 注册主 Agent 的专科发现和历史会话检索工具。
