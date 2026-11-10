@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,53 @@ class PatientSessionStore:
                 (patient_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_manual_handoffs(self) -> list[dict[str, Any]]:
+        """给管理端列出自动恢复后仍需人工处理的会话。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT thread_id, patient_id, title, messages, agent_state, updated_at "
+                "FROM patient_sessions WHERE status='manual_handoff_required' "
+                "ORDER BY updated_at ASC"
+            ).fetchall()
+        return [
+            {
+                "thread_id": row["thread_id"],
+                "patient_id": row["patient_id"],
+                "title": row["title"],
+                "messages": json.loads(row["messages"]),
+                "handoff": json.loads(row["agent_state"]).get("handoff", {}),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def resolve_manual_handoff(self, thread_id: str, reply: str) -> bool:
+        """把人工结论追加回原会话，并原子关闭待处理状态。"""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT messages, agent_state FROM patient_sessions "
+                "WHERE thread_id=? AND status='manual_handoff_required'",
+                (thread_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            messages = json.loads(row["messages"])
+            messages.append({
+                "id": f"assistant-{uuid.uuid4().hex}",
+                "role": "assistant",
+                "content": reply,
+            })
+            agent_state = json.loads(row["agent_state"])
+            handoff = agent_state.get("handoff", {})
+            handoff["resolved"] = True
+            agent_state = {"activity": "人工已处理", "handoff": handoff}
+            cursor = connection.execute(
+                "UPDATE patient_sessions SET messages=?, agent_state=?, status='ready', "
+                "updated_at=? WHERE thread_id=? AND status='manual_handoff_required'",
+                (_dump(messages[-200:]), _dump(agent_state), datetime.now(timezone.utc).isoformat(), thread_id),
+            )
+        return cursor.rowcount == 1
 
     def get(self, thread_id: str, patient_id: str) -> dict[str, Any] | None:
         with self._connect() as connection:

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+import secrets
 import re
 import uuid
 from http import HTTPStatus
@@ -37,6 +38,7 @@ from backend.integrations.mcp.patient_fhir import patient_id_from_context
 from backend.shared.sessions.session_store import PatientSessionStore
 from backend.shared.tasking.idempotency_store import IdempotencyConflict
 from backend.runtime.active_runs import active_runs
+from backend.runtime.agent_recovery import ManualHandoffRequired
 from backend.runtime.async_runner import run_async, submit_async
 from backend.runtime.model_registry import ModelRegistry
 
@@ -153,7 +155,43 @@ class InterruptAwareRunFinishedEvent(RunFinishedEvent):
 class AgentRequestHandler(BaseHTTPRequestHandler):
     server_version = "AgentService/0.1"
 
+    def _handoff_authorized(self) -> bool:
+        expected = os.getenv("AGENT_ADMIN_TOKEN", "").strip()
+        supplied = self.headers.get("X-Admin-Token", "")
+        if not expected:
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "\u7ba1\u7406\u5458\u540e\u53f0\u5c1a\u672a\u914d\u7f6e AGENT_ADMIN_TOKEN\u3002"})
+            return False
+        if not supplied or not secrets.compare_digest(supplied, expected):
+            self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "\u7ba1\u7406\u5458\u5bc6\u94a5\u4e0d\u6b63\u786e\u3002"})
+            return False
+        return True
+
+    def _send_handoffs(self) -> None:
+        if self._handoff_authorized():
+            self._send_json(HTTPStatus.OK, {"handoffs": session_store.list_manual_handoffs()})
+
+    def _resolve_handoff(self, path: str) -> None:
+        if not self._handoff_authorized():
+            return
+        match = re.fullmatch(r"/api/admin/handoffs/([A-Za-z0-9_.:-]{1,128})/resolve", path)
+        if match is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "\u627e\u4e0d\u5230\u8fd9\u4e2a\u7ba1\u7406\u5458\u63a5\u53e3\u3002"})
+            return
+        try:
+            reply = self._read_request().get("reply")
+            if not isinstance(reply, str) or not reply.strip() or len(reply) > 20000:
+                raise ValueError("\u4eba\u5de5\u56de\u590d\u9700\u8981\u586b\u5199 1 \u5230 20000 \u4e2a\u5b57\u7b26\u3002")
+            if not session_store.resolve_manual_handoff(match.group(1), reply.strip()):
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "\u5f85\u5904\u7406\u8bb0\u5f55\u4e0d\u5b58\u5728\u6216\u5df2\u5904\u7406\u3002"})
+                return
+            self._send_json(HTTPStatus.OK, {"resolved": True})
+        except ValueError as error:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+
     def do_GET(self) -> None:
+        if urlparse(self.path).path == "/api/admin/handoffs":
+            self._send_handoffs()
+            return
         parsed = urlparse(self.path)
         request_path = parsed.path
         if request_path == "/api/v1/agents/patient/sessions":
@@ -202,6 +240,14 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self) -> None:
         path = urlparse(self.path).path
+        if path == "/api/admin/handoffs" or re.fullmatch(r"/api/admin/handoffs/[A-Za-z0-9_.:-]{1,128}/resolve", path):
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self._send_cors_headers()
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Accept, X-Admin-Token")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+            return
         if path not in {"/api/v1/agents/patient/ag-ui", "/api/v1/agents/patient/sessions/import", "/api/v1/agents/patient/profile", "/api/v1/agents/patient/models", "/api/v1/agents/patient/model"} and not path.startswith(
             ("/api/v1/agents/patient/runs/", "/api/v1/agents/patient/sessions")
         ):
@@ -216,6 +262,9 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_path = urlparse(self.path).path
+        if re.fullmatch(r"/api/admin/handoffs/[A-Za-z0-9_.:-]{1,128}/resolve", request_path):
+            self._resolve_handoff(request_path)
+            return
         if request_path == "/api/v1/agents/patient/sessions/import":
             self._import_session()
             return
@@ -389,6 +438,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "暂时无法确认患者数据状态。"})
             return
         previous_session = session_store.get(run_input.thread_id, patient_id)
+        if previous_session and previous_session.get("status") == "manual_handoff_required":
+            self._send_json(
+                HTTPStatus.CONFLICT,
+                {"error": "\u672c\u4f1a\u8bdd\u6b63\u5728\u7b49\u5f85\u4eba\u5de5\u5904\u7406\uff0c\u5904\u7406\u5b8c\u6210\u540e\u518d\u7ee7\u7eed\u3002"},
+            )
+            return
         if previous_session:
             previous_messages = {
                 item.get("id"): item
@@ -580,6 +635,39 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     )
                     self._write_event(encoder, finished)
                     break
+                elif kind == "handoff":
+                    handoff = value
+                    answer = "\u8fd9\u6b21\u6ca1\u80fd\u5b89\u5168\u5b8c\u6210\u5904\u7406\uff0c\u5df2\u7ecf\u8f6c\u7ed9\u4eba\u5de5\u670d\u52a1\u56e2\u961f\uff0c\u8bf7\u7b49\u5f85\u5de5\u4f5c\u4eba\u5458\u5904\u7406\u3002"
+                    session_store.save(
+                        run_input.thread_id,
+                        patient_id,
+                        _append_assistant(request_messages, answer),
+                        status="manual_handoff_required",
+                        agent_state={
+                            "activity": "\u7b49\u5f85\u4eba\u5de5\u5904\u7406",
+                            "handoff": {
+                                "stage": handoff.stage,
+                                "tool": handoff.tool_name,
+                                "error_type": handoff.error_type,
+                            },
+                        },
+                        pending_interrupts=[],
+                    )
+                    self._write_event(encoder, TextMessageContentEvent(
+                        type=EventType.TEXT_MESSAGE_CONTENT,
+                        message_id=message_id,
+                        delta=answer,
+                    ))
+                    self._write_event(encoder, TextMessageEndEvent(
+                        type=EventType.TEXT_MESSAGE_END,
+                        message_id=message_id,
+                    ))
+                    self._write_event(encoder, InterruptAwareRunFinishedEvent(
+                        type=EventType.RUN_FINISHED,
+                        thread_id=run_input.thread_id,
+                        run_id=run_input.run_id,
+                    ))
+                    break
                 elif kind == "error":
                     partial = str(progress["answer"])
                     session_store.save(
@@ -616,6 +704,16 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     def _queue_completion(events: queue.Queue, future: object, run_id: str, thread_id: str) -> None:
         try:
             result = future.result()
+        except ManualHandoffRequired as error:
+            logging.error(
+                "AG-UI automatic recovery exhausted; queued for human review, runId=%s threadId=%s stage=%s tool=%s",
+                run_id,
+                thread_id,
+                error.stage,
+                error.tool_name,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+            events.put(("handoff", error))
         except Exception as error:
             logging.error(
                 "AG-UI \u60a3\u8005 Agent \u6267\u884c\u5931\u8d25\uff0crunId=%s threadId=%s",

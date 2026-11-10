@@ -18,6 +18,7 @@ from backend.agents.patient.tools import create_patient_tools
 from backend.integrations.memory.vector_store import PatientMemoryVectorStore
 from backend.integrations.mcp.patient_fhir import mcp_transport, patient_id_from_context
 from backend.runtime.active_runs import active_runs
+from backend.runtime.agent_recovery import create_recovery_middleware
 from backend.runtime.async_runner import run_async
 from backend.runtime.clock import current_time_context
 
@@ -202,12 +203,29 @@ class PatientMainAgent(RoleMainAgent):
             subagents = registry.deepagent_specs(
                 available, patient_id, task_key, long_term_profile["summary"], time_context
             )
+            safe_read_tools = {
+                name
+                for registered in registry.discover().values()
+                for name in registered.definition.read_tools
+            }
+            for subagent in subagents:
+                safe_tools = {
+                    item.name for item in subagent["tools"]
+                    if item.name in safe_read_tools or item.name == "get_current_time"
+                }
+                subagent["middleware"] = create_recovery_middleware(safe_tools)
             tools = create_patient_tools(registry, memory_tool, remember, memory_enabled)
             async with AsyncSqliteSaver.from_conn_string(str(checkpoint_database)) as checkpointer:
                 await checkpointer.setup()
                 graph = create_deep_agent(
                     model=streaming_model,
                     tools=tools,
+                    middleware=create_recovery_middleware({
+                        "discover_patient_agents",
+                        "search_cancer_knowledge",
+                        "search_patient_history",
+                        "get_current_time",
+                    }),
                     system_prompt=self._prompt_with_context(
                         recalled, long_term_profile["summary"], time_context
                     ),
@@ -273,7 +291,6 @@ class PatientMainAgent(RoleMainAgent):
                 if on_delta is None:
                     result = await graph.ainvoke(request_state, config=config)
                 else:
-                    streamed_text = False
                     model_runs: dict[str, dict[str, Any]] = {}
                     active_subagent_name = ""
 
@@ -354,24 +371,10 @@ class PatientMainAgent(RoleMainAgent):
                         if (
                             event_name == "on_chat_model_stream"
                         ):
-                            chunk = event.get("data", {}).get("chunk")
                             if event_run_id not in model_runs:
                                 set_trace(event_run_id, namespace, "模型开始返回首个流式片段", first_output=True)
                             elif model_runs[event_run_id]["first_output_ms"] is None:
                                 set_trace(event_run_id, namespace, "模型开始返回首个流式片段", first_output=True)
-                            content = getattr(chunk, "content", "")
-                            if not namespace or "|" not in namespace:
-                                if isinstance(content, str) and content:
-                                    streamed_text = True
-                                    on_delta(content)
-                                elif isinstance(content, list):
-                                    visible = "".join(
-                                        str(part.get("text", "")) for part in content
-                                        if isinstance(part, dict) and part.get("type") == "text"
-                                    )
-                                    if visible:
-                                        streamed_text = True
-                                        on_delta(visible)
                     state = await graph.aget_state(config)
                     result = dict(state.values)
                     interrupts = [interrupt for task in state.tasks for interrupt in task.interrupts]
@@ -381,8 +384,6 @@ class PatientMainAgent(RoleMainAgent):
                 if self._has_pending_interrupt(result) and on_interrupt is not None:
                     update_state("等待你确认", current_todos)
                     on_interrupt(self._agui_interrupts(result))
-                if on_delta is not None and not streamed_text:
-                    on_delta(reply)
                 if memory_enabled:
                     user_entry_id = await asyncio.to_thread(
                         memory.archive, patient_id, thread_id, task_key, "user", message
@@ -394,6 +395,9 @@ class PatientMainAgent(RoleMainAgent):
                     await asyncio.to_thread(memory.archive, patient_id, thread_id, task_key, "assistant", reply)
                 if not self._has_pending_interrupt(result):
                     update_state("已完成", current_todos)
+                if on_delta is not None:
+                    # 等模型、工具和归档都完成后，再一次性发送完整答复。
+                    on_delta(reply)
                 return reply
 
     @staticmethod
