@@ -82,6 +82,8 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8010/api/v1/agents/patient
 
 AG-UI 患者入口：`POST /api/v1/agents/patient/ag-ui`。它接收 AG-UI 的 `RunAgentInput`，返回 `text/event-stream`，以 `RUN_STARTED`、文本增量事件和 `RUN_FINISHED` 表示一次对话。请求里 `threadId` 是会话号，每轮用新的 `runId`；同一个 `threadId` 会恢复 SQLite 会话。首次调用若 BGE 模型缓存不存在，会自动下载到 `AGENT_MODEL_DIR`；默认复用旁边知识平台的 `models/` 目录。
 
+患者端 AG-UI 所用的完整接口清单、请求字段、SSE 事件、会话与模型辅助接口见[患者端 AG-UI 接口总览](docs/api/ag-ui.md)。文件提取是其中一个辅助接口。
+
 浏览器跨域调用可在 `.env` 设置 `AGENT_CORS_ORIGINS`，用逗号分隔允许的页面地址；本地默认 `*` 且不启用 Cookie 凭据。LangSmith 追踪仍由 `LANGSMITH_TRACING=true`、`LANGSMITH_API_KEY` 和 `LANGSMITH_PROJECT` 控制，模型与子 Agent 调用会出现在该项目的 Traces 页面。
 
 PowerShell 用 `curl.exe -N` 读取事件流：
@@ -117,7 +119,7 @@ curl.exe -N "http://localhost:8010/api/v1/agents/patient/ag-ui" -H "Content-Type
 
 聊天输入框可上传 PDF、DOCX、XLSX、XLS、PNG、JPEG、TXT 和 CSV。识别接口是 `POST /api/v1/agents/patient/files/extract`，使用 `multipart/form-data`，一次最多 5 个文件，请求总大小不超过 20 MB、单个文件不超过 15 MB。识别文本最多保留 12000 字；PDF 按页提取并把表格排成 Markdown，扫描 PDF 和图片使用简体中文与英文 OCR，Word 表格和电子表格工作表也会保留边界。
 
-完整请求与响应格式、`curl` 示例和错误码见[文件提取接口文档](docs/api/file-upload.md)。
+文件提取接口的详细请求与响应格式见[AG-UI 接口总览的文件识别章节](docs/api/ag-ui.md#2-文件识别)。
 
 前端发送聊天时，会把识别文本标成“用户上传文件的内容”，附在当前问题后，并保存到该会话。原始文件不会单独存到服务器。Docker 镜像会安装 Tesseract 和中英文语言包；本地开发若需要图片或扫描 PDF OCR，也要安装 Tesseract 及 `chi_sim`、`eng` 语言数据。
 
