@@ -1,6 +1,6 @@
 # 患者端 AG-UI 接口
 
-本文档覆盖患者聊天页面使用的整套 HTTP 接口：AG-UI 对话流、文件识别、会话读取与导入、运行取消、模型切换和患者资料。文件识别是其中一个辅助接口，识别出的文本会随 AG-UI 对话请求交给 Agent。
+本文档覆盖 Agent Service 已提交的患者端 AG-UI 及其关联 HTTP 接口：对话流、文件识别、会话读取与导入、运行取消、模型切换、患者资料，以及兼容旧调用方的同步 Gateway 入口。文件识别是其中一个辅助接口，识别出的文本会随 AG-UI 对话请求交给 Agent。
 
 ## 通用约定
 
@@ -16,6 +16,7 @@
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/v1/agents/patient/ag-ui` | 发送一轮 AG-UI 对话并接收 SSE 事件 |
+| `POST` | `/api/v1/agents/{role}/invoke` | 同步调用指定角色的 Gateway，不使用 AG-UI SSE |
 | `POST` | `/api/v1/agents/patient/files/extract` | 识别上传文件，返回文本供对话使用 |
 | `GET` | `/api/v1/agents/patient/sessions?patientId=...` | 列出患者会话 |
 | `GET` | `/api/v1/agents/patient/sessions/{threadId}?patientId=...` | 读取一条会话 |
@@ -232,3 +233,32 @@ curl -X POST "http://localhost:8010/api/v1/agents/patient/files/extract" \
 `GET /health`
 
 成功返回 `{"status":"ok"}`。
+
+## 7. 同步 Gateway 调用（非 AG-UI）
+
+`POST /api/v1/agents/{role}/invoke`
+
+这是服务保留的同步调用入口，供不使用 AG-UI 事件流的调用方使用。`role` 支持 `patient`、`doctor`、`management` 和 `nursing`。同一个 `taskKey` 与相同请求重复提交会返回缓存结果；同一个 `taskKey` 搭配不同请求会返回 `409`。
+
+```json
+{
+  "taskKey": "patient-demo-task-001",
+  "message": "帮我准备下次复诊的问题",
+  "context": {"patient_id": "demo-patient-0001"}
+}
+```
+
+`taskKey` 是 1 至 128 个字符的稳定任务编号；`message` 是 1 至 20000 字的用户内容；`context` 必须是 JSON 对象。请求体仍受通用 1 MB 限制。
+
+成功响应：
+
+```json
+{
+  "taskKey": "patient-demo-task-001",
+  "role": "patient",
+  "reply": "可以先整理近期症状、检查结果和想咨询的问题。",
+  "cached": false
+}
+```
+
+**状态码：**`200` 成功；`400` 参数格式或长度错误；`404` 角色不存在；`409` 同一 `taskKey` 被用于不同请求；`502` Agent 调用失败；`503` Agent 配置不可用。
