@@ -130,7 +130,7 @@ curl -X POST "http://localhost:8010/api/v1/agents/patient/files/extract" \
   -F "files=@results.xlsx"
 ```
 
-支持 PDF、DOCX、XLSX、XLS、PNG、JPEG、TXT 和 CSV；一次最多 5 个文件，请求总大小不超过 20 MB，单个文件不超过 15 MB。识别文本合计最多 12000 字，超出时按上传顺序截断。PDF 按页提取，表格转成 Markdown；扫描 PDF 和图片使用简体中文、英文 OCR；Word 表格和电子表格工作表会保留结构边界。
+支持 PDF、DOCX、XLSX、XLSM、XLS、PNG、JPEG、TXT 和 CSV；一次最多 5 个文件，请求总大小不超过 20 MB，单个文件不超过 15 MB。识别文本合计最多 12000 字，超出时按上传顺序截断。PDF 按页提取，表格转成 Markdown；扫描 PDF 和图片使用简体中文、英文 OCR；Word 表格和电子表格工作表会保留结构边界。
 
 成功响应：
 
@@ -155,6 +155,8 @@ curl -X POST "http://localhost:8010/api/v1/agents/patient/files/extract" \
 ```
 
 **状态码：**`200` 成功；`400` 请求格式、文件数量、大小或扩展名不符合要求；`422` 文件内容无法解析或 OCR 失败。
+
+错误响应为 JSON，例如：`{"error":"一次最多上传 5 个文件。"}`。
 
 扫描 PDF 和图片 OCR 依赖 Tesseract 与 `chi_sim`、`eng` 语言数据。Docker 镜像已包含这些依赖。
 
