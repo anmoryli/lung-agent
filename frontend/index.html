@@ -101,6 +101,9 @@
     textarea { display: block; width: 100%; min-height: 48px; max-height: 170px; resize: vertical; padding: 7px 2px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 14px; line-height: 1.6; }
     textarea::placeholder { color: #9aa39d; }
     .composer-row { display: flex; align-items: center; justify-content: space-between; }
+    .upload-row { display: flex; align-items: center; gap: 9px; min-height: 30px; margin: 2px 0 6px; }
+    .upload-button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; color: #53645b; background: #fff; font-size: 12px; }
+    .upload-status { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
     .hint { color: #98a099; font-size: 11px; }
     .send-actions { display: flex; gap: 8px; }
     .send-button, .stop-button { min-width: 76px; height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 10px; color: white; background: var(--green); font-size: 12px; font-weight: 600; }
@@ -208,7 +211,12 @@
       <div class="composer-wrap">
         <form id="chatForm" class="composer">
           <label class="sr-only" for="messageInput">输入你的问题</label>
-          <textarea id="messageInput" placeholder="写下你想问的事…" rows="2" required></textarea>
+          <textarea id="messageInput" placeholder="写下你想问的事…" rows="2"></textarea>
+          <div class="upload-row">
+            <input id="fileInput" class="sr-only" type="file" multiple accept=".pdf,.docx,.xlsx,.xlsm,.xls,.png,.jpg,.jpeg,.txt,.csv">
+            <button id="uploadButton" class="upload-button" type="button">＋ 添加文件</button>
+            <span id="uploadStatus" class="upload-status" aria-live="polite"></span>
+          </div>
           <div class="composer-row">
             <span class="hint">Enter 发送 · Shift + Enter 换行</span>
             <div class="send-actions">

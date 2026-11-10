@@ -11,7 +11,12 @@
     const profileDialog = document.querySelector("#profileDialog");
     const profilePanel = document.querySelector("#profilePanel");
     const profileTabs = document.querySelector("#profileTabs");
+    const fileInput = document.querySelector("#fileInput");
+    const uploadButton = document.querySelector("#uploadButton");
+    const uploadStatus = document.querySelector("#uploadStatus");
     let state = { threadId: newId("patient-chat"), messages: [], patientId: "demo-patient-0001" };
+    let pendingUploads = [];
+    let uploadingFiles = false;
     let activeController = null;
     let sessionCatalog = [];
     let profileData = null;
@@ -245,8 +250,8 @@
       }
     }
 
-    function addMessage(role, content) {
-      const item = { id: newId("msg"), role, content };
+    function addMessage(role, content, attachments = []) {
+      const item = { id: newId("msg"), role, content, attachments };
       state.messages.push(item);
       return item;
     }
@@ -332,6 +337,12 @@
       if (message.role === "assistant") renderMarkdown(content, message.content);
       else content.textContent = message.content;
       bubble.append(content);
+      if (message.role === "user" && message.attachments?.length) {
+        const names = document.createElement("div");
+        names.className = "upload-status";
+        names.textContent = `已附文件：${message.attachments.map(file => file.name).join("、")}`;
+        bubble.append(names);
+      }
       let progress = null;
       if (message.role === "assistant") {
         const section = document.createElement("section");
@@ -540,7 +551,7 @@
       await runAgent({ resume });
     }
 
-    async function runAgent({ resume } = {}) {
+    async function runAgent({ resume, uploadedFiles } = {}) {
       if (activeController) return;
       const runState = state;
       const lastUser = [...state.messages].reverse().find(message => message.role === "user");
@@ -565,6 +576,9 @@
           context: [{ description: "patient_id", value: patientId.value.trim() || "demo-patient-0001" }],
           forwardedProps: {},
         };
+        if (uploadedFiles?.length) {
+          body.context.push({ description: "uploadedFiles", value: JSON.stringify(uploadedFiles) });
+        }
         if (resume) body.resume = resume;
         const response = await fetch("/api/v1/agents/patient/ag-ui", {
           method: "POST",
@@ -639,12 +653,65 @@
     form.addEventListener("submit", event => {
       event.preventDefault();
       const content = input.value.trim();
-      if (!content || activeController) return;
-      addMessage("user", content);
+      if ((!content && !pendingUploads.length) || activeController || uploadingFiles) return;
+      const attachments = pendingUploads;
+      const extractedFiles = attachments.map(({ name, text }) => ({ name, text }));
+      addMessage("user", content || "请阅读我上传的文件。", attachments.map(({ name }) => ({ name })));
+      pendingUploads = [];
+      renderUploadStatus();
       input.value = "";
       renderMessage(state.messages.at(-1));
-      runAgent();
+      runAgent({ uploadedFiles: extractedFiles });
     });
+
+    uploadButton.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const selected = [...fileInput.files];
+      fileInput.value = "";
+      if (!selected.length) return;
+      if (selected.length + pendingUploads.length > 5) {
+        uploadStatus.textContent = "一次最多添加 5 个文件";
+        return;
+      }
+      uploadingFiles = true;
+      uploadButton.disabled = true;
+      uploadStatus.textContent = "正在识别文件…";
+      try {
+        const formData = new FormData();
+        selected.forEach(file => formData.append("files", file));
+        const response = await fetch("/api/v1/agents/patient/files/extract", { method: "POST", body: formData });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "文件识别失败");
+        pendingUploads.push(...result.files);
+        uploadStatus.textContent = result.truncated ? "识别完成，内容较长，已截断" : "识别完成";
+        renderUploadStatus();
+      } catch (error) {
+        uploadStatus.textContent = error.message;
+      } finally {
+        uploadingFiles = false;
+        uploadButton.disabled = false;
+      }
+    });
+
+    function renderUploadStatus() {
+      uploadStatus.replaceChildren();
+      for (const [index, file] of pendingUploads.entries()) {
+        const chip = document.createElement("span");
+        chip.style.cssText = "display:inline-flex;align-items:center;gap:5px;margin-right:8px;padding:3px 7px;border-radius:7px;background:#eef2ed";
+        const name = document.createElement("span");
+        name.textContent = file.name;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.setAttribute("aria-label", `移除 ${file.name}`);
+        remove.textContent = "×";
+        remove.addEventListener("click", () => {
+          pendingUploads.splice(index, 1);
+          renderUploadStatus();
+        });
+        chip.append(name, remove);
+        uploadStatus.append(chip);
+      }
+    }
 
     input.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey) {
@@ -657,6 +724,8 @@
     document.querySelector("#newChat").addEventListener("click", () => {
       activeController?.abort();
       state = { threadId: newId("patient-chat"), messages: [], patientId: patientId.value.trim() || "demo-patient-0001" };
+      pendingUploads = [];
+      uploadStatus.replaceChildren();
       renderHistory();
       renderSessionCatalog();
       input.focus();
