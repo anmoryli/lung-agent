@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 import re
 from typing import Any
@@ -41,52 +42,59 @@ def mcp_transport() -> Any:
 def make_patient_tool(raw_tool: Any, patient_id: str, task_key: str) -> Any:
     """去掉模型可填写的患者、确认和幂等键，由服务端统一补上。"""
     from langchain_core.tools import StructuredTool
-    from pydantic import Field, create_model
+    from jsonschema import ValidationError, validators
 
     source_schema = raw_tool.args_schema
-    if isinstance(source_schema, dict):
-        source_fields = source_schema.get("properties", {})
-        required_fields = set(source_schema.get("required", []))
-        property_specs = {
-            name: (spec, name in required_fields)
-            for name, spec in source_fields.items()
-        }
-    else:
-        source_fields = source_schema.model_fields
-        property_specs = {
-            name: ({"type": _python_type(field.annotation), "default": field.default}, field.is_required())
-            for name, field in source_fields.items()
-        }
+    if not isinstance(source_schema, dict):
+        source_schema = source_schema.model_json_schema()
+    if not isinstance(source_schema, dict):
+        raise TypeError(f"MCP 工具 {raw_tool.name} 没有可用的 JSON Schema。")
+    if source_schema.get("type") != "object":
+        raise ValueError(f"MCP 工具 {raw_tool.name} 的参数 schema 根节点必须是 object。")
 
-    fields: dict[str, tuple[Any, Any]] = {}
     hidden = {"patient_id", "task_key", "confirmed", "doctor_confirmed", "practitioner_id"}
-    for field_name, (spec, is_required) in property_specs.items():
-        if field_name in hidden:
-            continue
-        annotation = _json_schema_type(spec)
-        default = ... if is_required else spec.get("default", None)
-        if "description" in spec:
-            default = Field(default, description=spec["description"])
-        fields[field_name] = (annotation, default)
-    public_schema = create_model(f"{raw_tool.name.title().replace('_', '')}Input", **fields)
+    public_schema = deepcopy(source_schema)
+    properties = public_schema.get("properties", {})
+    if isinstance(properties, dict):
+        public_schema["properties"] = {
+            name: value for name, value in properties.items() if name not in hidden
+        }
+    required = public_schema.get("required", [])
+    if isinstance(required, list):
+        public_schema["required"] = [name for name in required if name not in hidden]
+
+    _reject_remote_schema_references(source_schema)
+    validator_class = validators.validator_for(source_schema)
+    validator_class.check_schema(source_schema)
+    validator = validator_class(
+        source_schema,
+        format_checker=validator_class.FORMAT_CHECKER,
+    )
+    source_fields = source_schema.get("properties", {})
 
     async def call_tool(**arguments: Any) -> Any:
         payload = dict(arguments)
-        original_fields = source_fields
-        if "patient_id" in original_fields:
+        if "patient_id" in source_fields:
             payload["patient_id"] = patient_id
-        if "task_key" in original_fields:
+        if "task_key" in source_fields:
             payload["task_key"] = f"{task_key}:{raw_tool.name}"[:128]
-        if "confirmed" in original_fields:
+        if "confirmed" in source_fields:
             # 只有 HITL 中间件获批后才会调用到这里。
             payload["confirmed"] = True
-        if "doctor_confirmed" in original_fields:
+        if "doctor_confirmed" in source_fields:
             payload["doctor_confirmed"] = False
-        if "practitioner_id" in original_fields:
+        if "practitioner_id" in source_fields:
             payload["practitioner_id"] = ""
+        try:
+            validator.validate(payload)
+        except ValidationError as error:
+            field_path = ".".join(str(part) for part in error.absolute_path) or "参数"
+            raise ValueError(
+                f"工具 {raw_tool.name} 的 {field_path} 不符合 MCP 参数规则。"
+            ) from None
         return await raw_tool.ainvoke(payload)
 
-    return StructuredTool.from_function(
+    return StructuredTool(
         name=raw_tool.name,
         description=raw_tool.description,
         coroutine=call_tool,
@@ -94,37 +102,15 @@ def make_patient_tool(raw_tool: Any, patient_id: str, task_key: str) -> Any:
     )
 
 
-def _json_schema_type(spec: dict[str, Any]) -> Any:
-    """把 MCP JSON Schema 的常用类型转成模型工具能用的 Python 类型。"""
-    from typing import Literal
-
-    schema_type = spec.get("type")
-    if schema_type == "array":
-        base = list[_json_schema_type(spec.get("items", {}))]
-    else:
-        base = {
-            "string": str,
-            "integer": int,
-            "number": float,
-            "boolean": bool,
-            "object": dict[str, Any],
-        }.get(schema_type, Any)
-    choices = spec.get("enum")
-    if choices and spec.get("type") == "string":
-        return Literal.__getitem__(tuple(choices))
-    return base
-
-
-def _python_type(annotation: Any) -> str:
-    """Pydantic 字段转成 JSON Schema 的基础类型名。"""
-    origin = getattr(annotation, "__origin__", None)
-    if origin is list:
-        return "array"
-    if origin is dict:
-        return "object"
-    return {
-        str: "string",
-        int: "integer",
-        float: "number",
-        bool: "boolean",
-    }.get(annotation, "object")
+def _reject_remote_schema_references(schema: Any) -> None:
+    """只接受工具 schema 自己带的引用，避免校验时访问外部地址。"""
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key in {"$ref", "$dynamicRef", "$recursiveRef"} and (
+                not isinstance(value, str) or not value.startswith("#")
+            ):
+                raise ValueError("MCP 工具 schema 只能引用自身定义，不能引用外部地址。")
+            _reject_remote_schema_references(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            _reject_remote_schema_references(value)
